@@ -2,6 +2,7 @@ import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/storage/local_storage_service.dart';
 import '../core/api/api_client.dart';
+import '../repositories/subscription_repository.dart';
 import 'websocket_service.dart';
 
 final locator = GetIt.instance;
@@ -15,6 +16,9 @@ Future<void> setupLocator() async {
   // ─── API Client ───────────────────────────
   final apiClient = ApiClient(storageService);
   locator.registerSingleton<ApiClient>(apiClient);
+
+  // ─── Subscription Repository ──────────────
+  locator.registerSingleton<SubscriptionRepository>(SubscriptionRepository(apiClient));
 
   // ─── Web Socket Service ────────────────────
   final webSocketService = WebSocketService();

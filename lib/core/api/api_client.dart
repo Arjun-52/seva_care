@@ -4,6 +4,9 @@ import 'package:http/http.dart' as http;
 import '../../config/env.dart';
 import '../storage/local_storage_service.dart';
 import '../errors/failure.dart';
+import '../../services/api_service.dart';
+import '../../utils/app_logger.dart';
+import '../../config/routes.dart';
 
 class ApiResult<T> {
   final bool success;
@@ -32,11 +35,77 @@ class ApiResult<T> {
 class ApiClient {
   final LocalStorageService _storageService;
   final http.Client _client;
+  Future<bool>? _refreshFuture;
 
   ApiClient(this._storageService, {http.Client? client})
       : _client = client ?? http.Client();
 
   String get baseUrl => Env.apiBaseUrl;
+
+  Future<bool> _handleTokenRefresh() async {
+    final refreshToken = _storageService.getRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      AppLogger.e('Refresh token is missing or empty');
+      return false;
+    }
+
+    if (_refreshFuture != null) {
+      AppLogger.i('Refresh request already in progress, deduplicating...');
+      return _refreshFuture!;
+    }
+
+    _refreshFuture = _performRefresh(refreshToken);
+    final success = await _refreshFuture!;
+    _refreshFuture = null;
+    return success;
+  }
+
+  Future<bool> _performRefresh(String refreshToken) async {
+    AppLogger.i('Refresh token request started');
+    try {
+      final uri = Uri.parse('$baseUrl/auth/refresh');
+      final response = await _client.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refreshToken}),
+      ).timeout(Duration(milliseconds: Env.receiveTimeout));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final body = jsonDecode(response.body);
+        if (body['success'] == true && body['data'] != null) {
+          final newData = body['data'];
+          final newAccessToken = newData['token'] as String;
+          final newRefreshToken = newData['refreshToken'] as String;
+
+          // Save securely
+          await _storageService.saveAuthToken(newAccessToken);
+          await _storageService.saveRefreshToken(newRefreshToken);
+          
+          // Sync with ApiService
+          ApiService.setTokens(access: newAccessToken, refresh: newRefreshToken);
+
+          AppLogger.i('Refresh successful, tokens updated');
+          return true;
+        }
+      }
+      AppLogger.e('Refresh request returned status: ${response.statusCode}');
+      return false;
+    } catch (e, stack) {
+      AppLogger.e('Refresh request failed due to error', e, stack);
+      final errStr = e.toString();
+      if (errStr.contains('SocketException') || errStr.contains('HandshakeException') || errStr.contains('TimeoutException')) {
+        rethrow; // Rethrow network errors so we don't log out!
+      }
+      return false;
+    }
+  }
+
+  void _logoutAndRedirect() {
+    AppLogger.e('Session expired, logging out user and redirecting to login');
+    _storageService.clearSession();
+    ApiService.clearTokens();
+    AppRoutes.router.go('/login');
+  }
 
   // ─── Headers Injection ──────────────────────
 
@@ -60,24 +129,7 @@ class ApiClient {
     String endpoint, {
     Map<String, String>? queryParams,
   }) async {
-    try {
-      final uri = _buildUri(endpoint, queryParams);
-      final headers = _buildHeaders();
-
-      // Simple Request Interceptor logger
-      _logRequest('GET', uri, headers, null);
-
-      final response = await _client.get(uri, headers: headers).timeout(
-            Duration(milliseconds: Env.receiveTimeout),
-          );
-
-      // Simple Response Interceptor logger
-      _logResponse('GET', uri, response);
-
-      return _handleResponse(response);
-    } catch (e) {
-      return ApiResult.error(_parseError(e));
-    }
+    return _executeWithRetry('GET', endpoint, queryParams: queryParams);
   }
 
   // ─── POST ──────────────────────────────────
@@ -86,23 +138,7 @@ class ApiClient {
     String endpoint, {
     Map<String, dynamic>? body,
   }) async {
-    try {
-      final uri = _buildUri(endpoint);
-      final headers = _buildHeaders();
-      final encodedBody = body != null ? jsonEncode(body) : null;
-
-      _logRequest('POST', uri, headers, encodedBody);
-
-      final response = await _client
-          .post(uri, headers: headers, body: encodedBody)
-          .timeout(Duration(milliseconds: Env.receiveTimeout));
-
-      _logResponse('POST', uri, response);
-
-      return _handleResponse(response);
-    } catch (e) {
-      return ApiResult.error(_parseError(e));
-    }
+    return _executeWithRetry('POST', endpoint, body: body);
   }
 
   // ─── PUT ───────────────────────────────────
@@ -111,44 +147,13 @@ class ApiClient {
     String endpoint, {
     Map<String, dynamic>? body,
   }) async {
-    try {
-      final uri = _buildUri(endpoint);
-      final headers = _buildHeaders();
-      final encodedBody = body != null ? jsonEncode(body) : null;
-
-      _logRequest('PUT', uri, headers, encodedBody);
-
-      final response = await _client
-          .put(uri, headers: headers, body: encodedBody)
-          .timeout(Duration(milliseconds: Env.receiveTimeout));
-
-      _logResponse('PUT', uri, response);
-
-      return _handleResponse(response);
-    } catch (e) {
-      return ApiResult.error(_parseError(e));
-    }
+    return _executeWithRetry('PUT', endpoint, body: body);
   }
 
   // ─── DELETE ────────────────────────────────
 
   Future<ApiResult<dynamic>> delete(String endpoint) async {
-    try {
-      final uri = _buildUri(endpoint);
-      final headers = _buildHeaders();
-
-      _logRequest('DELETE', uri, headers, null);
-
-      final response = await _client.delete(uri, headers: headers).timeout(
-            Duration(milliseconds: Env.receiveTimeout),
-          );
-
-      _logResponse('DELETE', uri, response);
-
-      return _handleResponse(response);
-    } catch (e) {
-      return ApiResult.error(_parseError(e));
-    }
+    return _executeWithRetry('DELETE', endpoint);
   }
 
   // ─── File Upload ───────────────────────────
@@ -158,31 +163,133 @@ class ApiClient {
     File file, {
     Map<String, String>? fields,
   }) async {
+    return _executeWithRetry('MULTIPART', endpoint, file: file, fields: fields);
+  }
+
+  // ─── Request with Silent Auto-Refresh & Retry ───
+
+  Future<ApiResult<dynamic>> _executeWithRetry(
+    String method,
+    String endpoint, {
+    Map<String, String>? queryParams,
+    Map<String, dynamic>? body,
+    File? file,
+    Map<String, String>? fields,
+  }) async {
+    final uri = _buildUri(endpoint, queryParams);
+    final isAuthEndpoint = endpoint.contains('auth/');
+
     try {
-      final uri = _buildUri(endpoint);
-      final request = http.MultipartRequest('POST', uri);
+      final headers = _buildHeaders();
+      http.Response response;
 
-      final token = _storageService.getAuthToken();
-      if (token != null && token.isNotEmpty) {
-        request.headers['Authorization'] = 'Bearer $token';
+      if (method == 'GET') {
+        _logRequest('GET', uri, headers, null);
+        response = await _client.get(uri, headers: headers).timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
+      } else if (method == 'POST') {
+        final encodedBody = body != null ? jsonEncode(body) : null;
+        _logRequest('POST', uri, headers, encodedBody);
+        response = await _client.post(uri, headers: headers, body: encodedBody).timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
+      } else if (method == 'PUT') {
+        final encodedBody = body != null ? jsonEncode(body) : null;
+        _logRequest('PUT', uri, headers, encodedBody);
+        response = await _client.put(uri, headers: headers, body: encodedBody).timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
+      } else if (method == 'DELETE') {
+        _logRequest('DELETE', uri, headers, null);
+        response = await _client.delete(uri, headers: headers).timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
+      } else if (method == 'MULTIPART') {
+        final request = http.MultipartRequest('POST', uri);
+        final token = _storageService.getAuthToken();
+        if (token != null && token.isNotEmpty) {
+          request.headers['Authorization'] = 'Bearer $token';
+        }
+        if (file != null) {
+          request.files.add(await http.MultipartFile.fromPath('file', file.path));
+        }
+        if (fields != null) {
+          request.fields.addAll(fields);
+        }
+        _logRequest('MULTIPART', uri, request.headers, 'Fields: $fields, File: ${file?.path}');
+        final streamedResponse = await request.send().timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
+        response = await http.Response.fromStream(streamedResponse);
+      } else {
+        throw UnsupportedError('Unsupported HTTP method: $method');
       }
 
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
-      if (fields != null) {
-        request.fields.addAll(fields);
+      _logResponse(method, uri, response);
+
+      // Check for 401 Unauthorized (invalid/expired access token)
+      if (response.statusCode == 401 && !isAuthEndpoint) {
+        AppLogger.i('Access token expired (401 received). Starting refresh token request...');
+        try {
+          final refreshed = await _handleTokenRefresh();
+          if (refreshed) {
+            AppLogger.i('Original request retried after successful refresh');
+            final retryHeaders = _buildHeaders();
+            http.Response retryResponse;
+
+            if (method == 'GET') {
+              retryResponse = await _client.get(uri, headers: retryHeaders).timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+            } else if (method == 'POST') {
+              retryResponse = await _client.post(uri, headers: retryHeaders, body: body != null ? jsonEncode(body) : null).timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+            } else if (method == 'PUT') {
+              retryResponse = await _client.put(uri, headers: retryHeaders, body: body != null ? jsonEncode(body) : null).timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+            } else if (method == 'DELETE') {
+              retryResponse = await _client.delete(uri, headers: retryHeaders).timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+            } else if (method == 'MULTIPART') {
+              final request = http.MultipartRequest('POST', uri);
+              final token = _storageService.getAuthToken();
+              if (token != null && token.isNotEmpty) {
+                request.headers['Authorization'] = 'Bearer $token';
+              }
+              if (file != null) {
+                request.files.add(await http.MultipartFile.fromPath('file', file.path));
+              }
+              if (fields != null) {
+                request.fields.addAll(fields);
+              }
+              final streamedResponse = await request.send().timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+              retryResponse = await http.Response.fromStream(streamedResponse);
+            } else {
+              throw UnsupportedError('Unsupported retry method');
+            }
+
+            _logResponse('$method (RETRY)', uri, retryResponse);
+            return _handleResponse(retryResponse);
+          } else {
+            AppLogger.e('Refresh failed, logging out user');
+            _logoutAndRedirect();
+            return ApiResult.error(AuthFailure('Session expired. Please login again.'));
+          }
+        } catch (refreshErr) {
+          AppLogger.e('Refresh token request failed due to network error');
+          return ApiResult.error(const NetworkFailure('Unable to connect. Please check internet connection.'));
+        }
       }
-
-      _logRequest('MULTIPART', uri, request.headers, 'Fields: $fields, File: ${file.path}');
-
-      final streamedResponse = await request.send().timeout(
-            Duration(milliseconds: Env.receiveTimeout),
-          );
-      final response = await http.Response.fromStream(streamedResponse);
-
-      _logResponse('MULTIPART', uri, response);
 
       return _handleResponse(response);
-    } catch (e) {
+    } catch (e, stack) {
+      AppLogger.e('ApiClient request failed with exception', e, stack);
       return ApiResult.error(_parseError(e));
     }
   }

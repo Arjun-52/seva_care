@@ -11,6 +11,11 @@ import '../settings/settings_screen.dart';
 import '../settings/help_support_screen.dart';
 import 'record_vitals_screen.dart';
 import 'visit_summary_screen.dart';
+import '../../core/storage/local_storage_service.dart';
+import '../../services/dependency_injection.dart';
+import '../../services/api_service.dart';
+import '../../utils/app_logger.dart';
+import '../../core/api/api_client.dart';
 
 class AideHome extends StatefulWidget {
   const AideHome({super.key});
@@ -398,25 +403,77 @@ class _AideHomeState extends State<AideHome> {
   }
 
   void _showSignOut() {
+    bool loading = false;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('${t('sign_out')}?', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
-        content: Text(t('sign_out_confirm'),
-          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('cancel'))),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              Navigator.pushAndRemoveUntil(context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: SevaColors.red),
-            child: Text(t('sign_out')),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text('${t('sign_out')}?', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+            content: loading
+                ? const SizedBox(
+                    height: 100,
+                    child: Center(
+                      child: CircularProgressIndicator(color: SevaColors.primary),
+                    ),
+                  )
+                : Text(t('sign_out_confirm'), style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
+            actions: loading
+                ? []
+                : [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('cancel'))),
+                    ElevatedButton(
+                      onPressed: () async {
+                        setState(() => loading = true);
+                        AppLogger.i('Logout initiated');
+                        
+                        final storage = locator<LocalStorageService>();
+                        
+                        try {
+                          AppLogger.i('Logout API called');
+                          final result = await locator<ApiClient>().post('auth/logout');
+                          
+                          if (result.success) {
+                            AppLogger.i('Logout successful');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                content: Text('Logged out successfully'),
+                                behavior: SnackBarBehavior.floating,
+                                backgroundColor: SevaColors.green,
+                              ));
+                            }
+                          } else {
+                            AppLogger.e('Logout API failed: ${result.errorMessage}');
+                          }
+                        } catch (e, stack) {
+                          AppLogger.e('Logout API failed with error', e, stack);
+                        } finally {
+                          AppLogger.i('Forced local logout executed, clearing session');
+                          await storage.clearSession();
+                          ApiService.clearTokens();
+                          AppLogger.i('Local session cleared');
+                          
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                          }
+                          
+                          AppLogger.i('Navigation to login');
+                          if (context.mounted) {
+                            Navigator.pushAndRemoveUntil(
+                              context,
+                              MaterialPageRoute(builder: (_) => const LoginScreen()),
+                              (route) => false,
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: SevaColors.red),
+                      child: Text(t('sign_out')),
+                    ),
+                  ],
+          );
+        },
       ),
     );
   }

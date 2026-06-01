@@ -5,6 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../screens/splash_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/auth/register_screen.dart';
+
+// Admin
+import '../screens/admin/admin_home.dart';
 
 // Senior
 import '../screens/senior/senior_home.dart';
@@ -43,6 +47,16 @@ class AppRoutes {
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterScreen(),
+      ),
+      
+      // ─── Admin Module ──────────────────────────
+      GoRoute(
+        path: '/admin',
+        builder: (context, state) => const AdminHome(),
       ),
 
       // ─── Senior Module ─────────────────────────

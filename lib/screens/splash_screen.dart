@@ -4,6 +4,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../config/theme.dart';
 import '../l10n/app_localizations.dart';
+import '../services/dependency_injection.dart';
+import '../core/storage/local_storage_service.dart';
+import '../services/api_service.dart';
+import '../utils/app_logger.dart';
+import '../core/api/api_client.dart';
+import '../models/user_model.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -156,7 +162,64 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     await Future.delayed(const Duration(milliseconds: 2200));
     if (!mounted) return;
 
-    context.go('/onboarding');
+    final storage = locator<LocalStorageService>();
+    final rememberMe = storage.getRememberMe();
+    final isLoggedIn = storage.getIsLoggedIn();
+    final token = storage.getAuthToken();
+    final refreshToken = storage.getRefreshToken();
+    final role = storage.getUserRole();
+
+    if (rememberMe && isLoggedIn && token != null && refreshToken != null && role != null) {
+      AppLogger.i('Restoring session for user. Role: $role');
+      ApiService.setTokens(access: token, refresh: refreshToken);
+
+      // Fetch fresh profile details from GET /v1/auth/me during session restoration
+      AppLogger.i('Fetch profile started');
+      try {
+        final profileResult = await locator<ApiClient>().get('auth/me');
+        if (profileResult.success && profileResult.data != null) {
+          final profileUser = UserModel.fromJson(profileResult.data as Map<String, dynamic>);
+          await storage.saveUserId(profileUser.id);
+          await storage.saveUserName(profileUser.name);
+          await storage.saveUserEmail(profileUser.email);
+          await storage.saveUserRole(profileUser.role.isNotEmpty ? profileUser.role : role);
+          await storage.saveUserPhone(profileUser.phone);
+          await storage.saveUserAvatar(profileUser.avatar);
+          await storage.saveUserCountry(profileUser.country);
+          await storage.saveUserTimezone(profileUser.timezone);
+          await storage.saveUserLanguage(profileUser.language);
+          await storage.saveUserStatus(profileUser.status);
+          AppLogger.i('Profile fetched successfully');
+          AppLogger.i('Profile cache updated');
+        } else {
+          AppLogger.e('Profile fetch failed: ${profileResult.errorMessage}');
+        }
+      } catch (profileErr, profileStack) {
+        AppLogger.e('Profile fetch failed', profileErr, profileStack);
+      }
+      
+      String destRoute = '/onboarding';
+      if (role == 'family') {
+        destRoute = '/family';
+      } else if (role == 'care_aide') {
+        destRoute = '/aide';
+      } else if (role == 'senior') {
+        destRoute = '/senior';
+      } else if (role == 'admin') {
+        destRoute = '/admin';
+      }
+
+      AppLogger.i('Navigation target detected: $destRoute');
+      if (mounted) {
+        context.go(destRoute);
+      }
+    } else {
+      AppLogger.i('No saved session found or rememberMe is disabled. Clearing session.');
+      await storage.clearSession();
+      if (mounted) {
+        context.go('/onboarding');
+      }
+    }
   }
 
   @override
