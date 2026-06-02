@@ -13,20 +13,23 @@ class ApiResult<T> {
   final T? data;
   final Map<String, dynamic>? pagination;
   final Failure? failure;
+  /// Top-level message from the API response body (present on both success and error).
+  final String? message;
 
   ApiResult({
     required this.success,
     this.data,
     this.pagination,
     this.failure,
+    this.message,
   });
 
-  factory ApiResult.success(T data, {Map<String, dynamic>? pagination}) {
-    return ApiResult(success: true, data: data, pagination: pagination);
+  factory ApiResult.success(T data, {Map<String, dynamic>? pagination, String? message}) {
+    return ApiResult(success: true, data: data, pagination: pagination, message: message);
   }
 
-  factory ApiResult.error(Failure failure) {
-    return ApiResult(success: false, failure: failure);
+  factory ApiResult.error(Failure failure, {String? message}) {
+    return ApiResult(success: false, failure: failure, message: message);
   }
 
   String get errorMessage => failure?.message ?? 'Unknown error occurred';
@@ -307,21 +310,33 @@ class ApiClient {
   ApiResult<dynamic> _handleResponse(http.Response response) {
     try {
       final body = jsonDecode(response.body);
+      final bodyMessage = body['message'] as String?;
+
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return ApiResult.success(
           body['data'],
           pagination: body['pagination'],
+          message: bodyMessage,
         );
       }
 
-      final message = body['error']?['message'] ?? 'Request failed (${response.statusCode})';
+      // Try multiple message locations to match different API error shapes
+      final errorText = body['error']?['message']
+          ?? bodyMessage
+          ?? (body['errors'] is List && (body['errors'] as List).isNotEmpty
+              ? (body['errors'] as List).first.toString()
+              : null)
+          ?? 'Request failed (${response.statusCode})';
+
+      AppLogger.e('[ApiClient] HTTP ${response.statusCode}: $errorText');
+
       if (response.statusCode == 401) {
-        return ApiResult.error(AuthFailure(message));
+        return ApiResult.error(AuthFailure(errorText), message: bodyMessage);
       }
       if (response.statusCode == 400) {
-        return ApiResult.error(ValidationFailure(message));
+        return ApiResult.error(ValidationFailure(errorText), message: bodyMessage);
       }
-      return ApiResult.error(ServerFailure(message));
+      return ApiResult.error(ServerFailure(errorText), message: bodyMessage);
     } catch (e) {
       return ApiResult.error(ServerFailure('Failed to parse response from server. Status: ${response.statusCode}'));
     }

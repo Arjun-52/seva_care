@@ -1,11 +1,26 @@
 import '../core/api/api_client.dart';
 import '../models/payment_history_model.dart';
-import '../models/payment_verification_model.dart';
 import '../models/current_subscription_model.dart';
 import '../models/subscription/subscription_plan_model.dart';
-import '../models/subscription/subscription_order_result.dart';
-import '../config/env.dart';
+import '../models/upgrade_subscription_model.dart';
 import '../utils/app_logger.dart';
+
+/// Result returned by [SubscriptionRepository.upgradeSubscription].
+///
+/// - [isImmediate] = true  → backend created a Razorpay order; open checkout.
+/// - [isImmediate] = false → backend scheduled a downgrade; show [message] to user.
+class UpgradeResult {
+  /// Human-readable message from the backend (always present).
+  final String message;
+
+  /// Set when [isImmediate] is true — contains order/plan details for Razorpay.
+  final UpgradeSubscriptionModel? order;
+
+  bool get isImmediate => order != null;
+
+  const UpgradeResult.immediate(UpgradeSubscriptionModel this.order, {required this.message});
+  const UpgradeResult.scheduled({required this.message}) : order = null;
+}
 
 class SubscriptionRepository {
   static const _tag = 'SubscriptionRepository';
@@ -26,81 +41,6 @@ class SubscriptionRepository {
     }
   }
 
-  /// Upgrade/Initiate a paid or free subscription
-  Future<SubscriptionOrderResult> upgradeSubscription(String planId) async {
-    AppLogger.i('[$_tag] Upgrading subscription to plan: $planId');
-    final res = await _apiClient.post(
-      'subscriptions/upgrade',
-      body: {'planId': planId},
-    );
-
-    if (!res.success || res.data == null) {
-      AppLogger.e('[$_tag] Failed to upgrade subscription: ${res.errorMessage}');
-      throw Exception(res.errorMessage);
-    }
-
-    final data = res.data as Map<String, dynamic>;
-    
-    // Check if it is a free order or if payment is not required
-    final isFree = data['isFree'] as bool? ?? false;
-    final subscriptionId = data['subscriptionId'] as String? ?? '';
-    
-    if (isFree || data['order'] == null) {
-      AppLogger.i('[$_tag] Free subscription detected');
-      return FreeSubscriptionOrder(subscriptionId: subscriptionId);
-    }
-
-    final orderData = data['order'] as Map<String, dynamic>;
-    final orderId = orderData['id'] as String? ?? '';
-    final amount = orderData['amount'] as int? ?? 0;
-    final paymentId = data['paymentId'] as String? ?? '';
-    final keyId = data['keyId'] as String? ?? Env.razorpayKey;
-
-    AppLogger.i('[$_tag] Paid subscription order created successfully: $orderId');
-    return PaidSubscriptionOrder(
-      orderId: orderId,
-      amount: amount,
-      keyId: keyId,
-      subscriptionId: subscriptionId,
-      paymentId: paymentId,
-    );
-  }
-
-  /// Verify a subscription payment with the backend
-  Future<PaymentVerificationResponse> verifySubscriptionPayment({
-    required String subscriptionId,
-    required String razorpayPaymentId,
-    String? razorpayOrderId,
-    String? razorpaySignature,
-  }) async {
-    AppLogger.i('[$_tag] Verifying payment for Subscription: $subscriptionId, Payment: $razorpayPaymentId');
-    
-    final body = {
-      'subscriptionId': subscriptionId,
-      'razorpayPaymentId': razorpayPaymentId,
-      if (razorpayOrderId != null) 'razorpayOrderId': razorpayOrderId,
-      if (razorpaySignature != null) 'razorpaySignature': razorpaySignature,
-    };
-
-    final res = await _apiClient.post(
-      'subscriptions/verify-payment',
-      body: body,
-    );
-
-    if (res.success && res.data != null) {
-      final response = PaymentVerificationResponse.fromJson(res.data as Map<String, dynamic>);
-      if (response.verified) {
-        AppLogger.i('[$_tag] Payment verified successfully');
-      } else {
-        AppLogger.e('[$_tag] Payment verification failed');
-      }
-      return response;
-    } else {
-      AppLogger.e('[$_tag] API error: ${res.errorMessage}');
-      throw Exception(res.errorMessage);
-    }
-  }
-
   /// Get current subscription status
   Future<CurrentSubscriptionModel?> getCurrentSubscription() async {
     AppLogger.i('[$_tag] Fetching current subscription');
@@ -117,7 +57,7 @@ class SubscriptionRepository {
     }
   }
 
-  /// Legacy methods (kept for compatibility)
+  /// Fetch payment history
   Future<List<PaymentHistoryModel>> getSubscriptionPayments() async {
     AppLogger.i('[$_tag] Fetching payment history');
     final res = await _apiClient.get('subscriptions/payments');
@@ -131,10 +71,78 @@ class SubscriptionRepository {
     }
   }
 
-  Future<PaymentVerificationResponse> verifyPayment(String subscriptionId, String razorpayPaymentId) async {
-    return verifySubscriptionPayment(
-      subscriptionId: subscriptionId,
-      razorpayPaymentId: razorpayPaymentId,
+  /// Upgrade (or downgrade) a subscription plan.
+  ///
+  /// Returns [UpgradeResult.immediate] when the backend created a Razorpay order
+  /// (the caller should open Razorpay Checkout).
+  ///
+  /// Returns [UpgradeResult.scheduled] when the backend accepted the request but
+  /// no order was created (e.g. downgrade scheduled for next billing cycle).
+  Future<UpgradeResult> upgradeSubscription(String planId) async {
+    AppLogger.i('[$_tag] Upgrade request started for planId: $planId');
+    final res = await _apiClient.post('subscriptions/upgrade', body: {
+      'planId': planId,
+    });
+
+    if (!res.success) {
+      // Hard API failure (4xx / 5xx)
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Upgrade request failed: $errMsg');
+      throw Exception(errMsg);
+    }
+
+    // Success + data → immediate Razorpay checkout
+    if (res.data != null) {
+      AppLogger.i('[$_tag] Upgrade response received — immediate checkout');
+      final model = UpgradeSubscriptionModel.fromJson(res.data as Map<String, dynamic>);
+      return UpgradeResult.immediate(model, message: res.failure?.message ?? 'Upgrade initiated');
+    }
+
+    // Success + data == null → scheduled change (downgrade / same-cycle deferral)
+    AppLogger.i('[$_tag] Upgrade accepted — scheduled (no order created). Message: ${res.message}');
+    return UpgradeResult.scheduled(
+      message: res.message ?? 'Your plan change has been scheduled for the next billing cycle.',
     );
   }
+
+  /// Verify subscription payment after Razorpay Checkout completes.
+  ///
+  /// Sends all captured Razorpay fields to the backend verify-payment endpoint.
+  /// [subscriptionId]    — from POST /v1/subscriptions/upgrade response
+  /// [razorpayPaymentId] — from Razorpay PaymentSuccessResponse
+  /// [razorpayOrderId]   — from Razorpay PaymentSuccessResponse
+  /// [razorpaySignature] — from Razorpay PaymentSuccessResponse
+  /// [backendPaymentId]  — paymentId from POST /v1/subscriptions/upgrade response
+  Future<bool> verifySubscriptionPayment({
+    required String subscriptionId,
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+    required String backendPaymentId,
+  }) async {
+    AppLogger.i(
+      '[$_tag] Verification started:\n'
+      '  subscriptionId    : $subscriptionId\n'
+      '  razorpayPaymentId : $razorpayPaymentId\n'
+      '  razorpayOrderId   : $razorpayOrderId\n'
+      '  razorpaySignature : $razorpaySignature\n'
+      '  backendPaymentId  : $backendPaymentId',
+    );
+    final res = await _apiClient.post('subscriptions/verify-payment', body: {
+      'subscriptionId':    subscriptionId,
+      'razorpayPaymentId': razorpayPaymentId,
+      'razorpayOrderId':   razorpayOrderId,
+      'razorpaySignature': razorpaySignature,
+      'paymentId':         backendPaymentId,
+    });
+    if (res.success) {
+      AppLogger.i('[$_tag] Verification success');
+      return true;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Verification failure: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
 }
+

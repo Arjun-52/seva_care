@@ -8,6 +8,7 @@ import '../../services/dependency_injection.dart';
 import '../../repositories/settings_repository.dart';
 import '../../models/settings_model.dart';
 import '../../utils/app_logger.dart';
+import 'package:go_router/go_router.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -394,6 +395,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Divider(height: 1, color: SevaColors.divider, indent: 52),
               _navItem(Icons.gavel, t('dpdp_act'), () {
                 _showDPDPInfo();
+              }),
+              const Divider(height: 1, color: SevaColors.divider, indent: 52),
+              _navItem(Icons.bug_report_outlined, 'Razorpay Payment Test', () {
+                GoRouter.of(context).push('/razorpay-test');
               }),
             ])),
             const SizedBox(height: 24),

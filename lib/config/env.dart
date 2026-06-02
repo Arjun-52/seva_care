@@ -2,9 +2,9 @@
 /// Switch between dev and production by changing the active profile
 class Env {
   // ─── Development (active) ─────────────────────────
-  static const String apiBaseUrl = 'http://192.168.29.159:4000/v1';
-  static const String wsUrl = 'ws://192.168.29.159:4000';
-  static const String razorpayKey = 'rzp_test_xxxxx';
+  static const String apiBaseUrl = 'https://shanta-unstabilized-ryker.ngrok-free.dev/v1';
+  static const String wsUrl = 'wss://shanta-unstabilized-ryker.ngrok-free.dev';
+  static const String razorpayKey = 'rzp_test_SgTgIrRTm5fJjb';
   static const String mapApiKey = 'YOUR_GOOGLE_MAPS_KEY';
 
   // ─── Production (disabled) ─

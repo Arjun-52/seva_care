@@ -10,9 +10,9 @@ import '../../models/current_subscription_model.dart';
 import '../../models/payment_history_model.dart';
 import '../../repositories/subscription_repository.dart';
 import '../../core/errors/failure.dart';
-import '../../services/subscription_payment_service.dart';
-import '../../models/subscription/subscription_payment_result.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../core/storage/local_storage_service.dart';
+import '../../config/env.dart';
 
 
 
@@ -35,20 +35,26 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
   bool _paymentsLoading = false;
   String? _paymentsError;
 
-
-  late SubscriptionPaymentService _paymentService;
+  late Razorpay _razorpay;
+  // Fields captured from POST /v1/subscriptions/upgrade
+  String? _activeUpgradeSubscriptionId; // subscriptionId
+  String? _activeBackendPaymentId;      // paymentId from upgrade response
+  bool _paymentLoading = false;
+  String? _paymentLoadingText;
 
   @override
   void initState() {
     super.initState();
-    _paymentService = locator<SubscriptionPaymentService>();
-    _paymentService.init();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
     _fetchSubscriptionData();
   }
 
   @override
   void dispose() {
-    _paymentService.dispose();
+    _razorpay.clear();
     _scrollController.dispose();
     super.dispose();
   }
@@ -229,42 +235,74 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: SevaColors.background,
-      appBar: AppBar(title: const Text('Subscription Plans')),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await _fetchSubscriptionData(isRefresh: true);
-          AppLogger.i('Refresh completed');
-        },
-        color: SevaColors.primary,
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(20),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // ─── Current Active Subscription Card ───
-            _buildCurrentSubscriptionCard(),
-            const SizedBox(height: 24),
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: SevaColors.background,
+          appBar: AppBar(title: const Text('Subscription Plans')),
+          body: RefreshIndicator(
+            onRefresh: () async {
+              await _fetchSubscriptionData(isRefresh: true);
+              AppLogger.i('Refresh completed');
+            },
+            color: SevaColors.primary,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // ─── Current Active Subscription Card ───
+                _buildCurrentSubscriptionCard(),
+                const SizedBox(height: 24),
 
-            Text('Choose Your Plan', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: SevaColors.textPrimary)),
-            const SizedBox(height: 4),
-            Text('Upgrade anytime. Cancel anytime.', style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
-            const SizedBox(height: 20),
+                Text('Choose Your Plan', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800, color: SevaColors.textPrimary)),
+                const SizedBox(height: 4),
+                Text('Upgrade anytime. Cancel anytime.', style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
+                const SizedBox(height: 20),
 
-            // Dynamically Loaded Plans List
-            _buildPlansSection(),
-            const SizedBox(height: 24),
+                // Dynamically Loaded Plans List
+                _buildPlansSection(),
+                const SizedBox(height: 24),
 
-            // Payment history
-            const SizedBox(height: 8),
-            const SectionTitle(title: 'Payment History', icon: Icons.receipt_long),
-            const SizedBox(height: 12),
-            _buildPaymentHistorySection(),
-            const SizedBox(height: 30),
-          ]),
+                // Payment history
+                const SizedBox(height: 8),
+                const SectionTitle(title: 'Payment History', icon: Icons.receipt_long),
+                const SizedBox(height: 12),
+                _buildPaymentHistorySection(),
+                const SizedBox(height: 30),
+              ]),
+            ),
+          ),
         ),
-      ),
+        if (_paymentLoading)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withOpacity(0.5),
+              child: Center(
+                child: Card(
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: SevaColors.primary),
+                        if (_paymentLoadingText != null) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            _paymentLoadingText!,
+                            style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.textPrimary),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -773,331 +811,303 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
     );
   }
 
-  void _performVerification(
-    String razorpayPaymentId,
-    String razorpayOrderId,
-    String razorpaySignature,
-    String planName,
-  ) {
+  void _showUpgradeDialog(BuildContext context, SubscriptionPlan plan) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => WillPopScope(
-        onWillPop: () async => false, // Disable back navigation
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          content: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(color: SevaColors.primary),
-                const SizedBox(height: 20),
-                Text(
-                  'Verifying payment...',
-                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: SevaColors.textPrimary),
-                ),
-              ],
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Upgrade to ${plan.name}?', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Text(
+          'Would you like to upgrade your subscription to ${plan.name}?',
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.textSecondary),
             ),
           ),
-        ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _startUpgradeFlow(plan);
+            },
+            child: Text(
+              'Upgrade',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary),
+            ),
+          ),
+        ],
       ),
     );
-
-    _callVerifyPaymentApi(razorpayPaymentId, razorpayOrderId, razorpaySignature, planName);
   }
 
-  Future<void> _callVerifyPaymentApi(
-    String razorpayPaymentId,
-    String razorpayOrderId,
-    String razorpaySignature,
-    String planName,
-  ) async {
-    try {
-      final repo = locator<SubscriptionRepository>();
-      final result = await repo.verifySubscriptionPayment(
-        subscriptionId: razorpayOrderId,
-        razorpayPaymentId: razorpayPaymentId,
-        razorpayOrderId: razorpayOrderId,
-        razorpaySignature: razorpaySignature,
-      );
+  void _showInfoSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: SevaColors.textPrimary,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
-      // Close the verifying payment dialog
-      if (mounted) {
-        Navigator.pop(context);
-      }
+  void _showSuccessDialog(String title, String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.check_circle, color: SevaColors.green, size: 28),
+            const SizedBox(width: 8),
+            Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: Text(
+          message,
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Great!',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-      if (result.verified) {
-        // Success flow: Store keys in LocalStorage
-        final storage = locator<LocalStorageService>();
-        await storage.setString('activeSubscriptionId', razorpayOrderId);
-        await storage.setString('activePlanName', planName);
-        await storage.setString('activePlanStatus', 'active');
-        await storage.setString('activationDate', DateTime.now().toIso8601String());
+  void _handlePaymentSuccess(PaymentSuccessResponse response) {
+    // Capture all fields required for POST /v1/subscriptions/verify-payment
+    final razorpayPaymentId = response.paymentId ?? '';
+    final razorpayOrderId   = response.orderId   ?? '';
+    final razorpaySignature = response.signature ?? '';
+    final subscriptionId    = _activeUpgradeSubscriptionId ?? '';
+    final backendPaymentId  = _activeBackendPaymentId      ?? '';
 
-        AppLogger.i('Payment verified successfully');
-        _showSuccessDialog('Subscription activated successfully', planName);
-      } else {
-        AppLogger.e('Verification failed');
-        _showFailureDialog(
-          'Payment verification failed. Please contact support if amount was deducted.',
-          razorpayPaymentId,
-          razorpayOrderId,
-          razorpaySignature,
-          planName,
-        );
-      }
-    } catch (e, stack) {
-      // Close the loading dialog
-      if (mounted) {
-        Navigator.pop(context);
-      }
+    AppLogger.i(
+      'Payment success:\n'
+      '  razorpayPaymentId : $razorpayPaymentId\n'
+      '  razorpayOrderId   : $razorpayOrderId\n'
+      '  razorpaySignature : $razorpaySignature\n'
+      '  subscriptionId    : $subscriptionId\n'
+      '  backendPaymentId  : $backendPaymentId',
+    );
 
-      String errorMsg = 'Payment verification failed. Please try again.';
-      if (e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
-        errorMsg = 'Unable to verify payment. Please check your internet connection.';
-      }
-      AppLogger.e('Payment verification failed', e, stack);
-      _showFailureDialog(
-        errorMsg,
-        razorpayPaymentId,
-        razorpayOrderId,
-        razorpaySignature,
-        planName,
-      );
+    if (subscriptionId.isEmpty) {
+      AppLogger.e('No active subscription ID found for verification');
+      _showErrorSnackbar('Verification error: missing subscription ID.');
+      return;
+    }
+
+    _verifyPayment(
+      subscriptionId: subscriptionId,
+      razorpayPaymentId: razorpayPaymentId,
+      razorpayOrderId: razorpayOrderId,
+      razorpaySignature: razorpaySignature,
+      backendPaymentId: backendPaymentId,
+    );
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    AppLogger.e('Payment failure: code=${response.code}, message=${response.message}');
+    setState(() {
+      _paymentLoading = false;
+      _paymentLoadingText = null;
+    });
+    
+    if (response.code == 2) {
+      _showInfoSnackbar("Payment cancelled by user.");
+    } else {
+      _showErrorSnackbar("Payment failed. Please try again.");
     }
   }
 
-  void _showSuccessDialog(String message, String planName) {
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    AppLogger.i('External wallet selected: ${response.walletName}');
+    setState(() {
+      _paymentLoading = false;
+      _paymentLoadingText = null;
+    });
+  }
+
+  Future<void> _verifyPayment({
+    required String subscriptionId,
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+    required String backendPaymentId,
+  }) async {
+    setState(() {
+      _paymentLoading = true;
+      _paymentLoadingText = 'Verifying payment...';
+    });
+    AppLogger.i(
+      'Verification payload:\n'
+      '  subscriptionId    : $subscriptionId\n'
+      '  razorpayPaymentId : $razorpayPaymentId\n'
+      '  razorpayOrderId   : $razorpayOrderId\n'
+      '  razorpaySignature : $razorpaySignature\n'
+      '  backendPaymentId  : $backendPaymentId',
+    );
+
+    try {
+      final success = await locator<SubscriptionRepository>().verifySubscriptionPayment(
+        subscriptionId: subscriptionId,
+        razorpayPaymentId: razorpayPaymentId,
+        razorpayOrderId: razorpayOrderId,
+        razorpaySignature: razorpaySignature,
+        backendPaymentId: backendPaymentId,
+      );
+      if (success) {
+        AppLogger.i('Verification success');
+        setState(() {
+          _paymentLoadingText = 'Refreshing subscription...';
+        });
+        await _fetchSubscriptionData(isRefresh: true);
+        AppLogger.i('Current subscription refreshed');
+        _showSuccessDialog('Success', 'Subscription upgraded successfully!');
+      } else {
+        AppLogger.e('Verification failure');
+        _showErrorSnackbar('Payment verification failed. Please contact support.');
+      }
+    } catch (e, st) {
+      AppLogger.e('Verification failure with error', e, st);
+      _showErrorSnackbar('Verification failed. Please contact support.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _paymentLoading = false;
+          _paymentLoadingText = null;
+          _activeUpgradeSubscriptionId = null;
+          _activeBackendPaymentId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _startUpgradeFlow(SubscriptionPlan plan) async {
+    if (_loading || _paymentLoading) return;
+
+    AppLogger.i('Selected plan: ${plan.name} | planId: ${plan.id}');
+    setState(() {
+      _paymentLoading = true;
+      _paymentLoadingText = 'Initiating upgrade...';
+    });
+
+    try {
+      AppLogger.i('Upgrade request started');
+      final result = await locator<SubscriptionRepository>().upgradeSubscription(plan.id);
+
+      // ── Case 1: Scheduled downgrade ─────────────────────────────────────
+      // Backend accepted the request but will apply it next billing cycle.
+      // No Razorpay order was created — just show the backend message.
+      if (!result.isImmediate) {
+        AppLogger.i('Upgrade scheduled: ${result.message}');
+        if (mounted) {
+          setState(() {
+            _paymentLoading = false;
+            _paymentLoadingText = null;
+          });
+          _showScheduledDialog(result.message);
+        }
+        return;
+      }
+
+      // ── Case 2: Immediate checkout ──────────────────────────────────────
+      final upgradeModel = result.order!;
+      AppLogger.i(
+        'Upgrade response received — immediate checkout:\n'
+        '  subscriptionId   : ${upgradeModel.subscriptionId}\n'
+        '  backendPaymentId : ${upgradeModel.paymentId}\n'
+        '  orderId          : ${upgradeModel.order.id}\n'
+        '  amount           : ${upgradeModel.order.amount}\n'
+        '  plan             : ${upgradeModel.plan.name}',
+      );
+
+      // Store both IDs from the upgrade response — needed for verify-payment
+      _activeUpgradeSubscriptionId = upgradeModel.subscriptionId;
+      _activeBackendPaymentId = upgradeModel.paymentId;
+
+      final storage = locator<LocalStorageService>();
+      final userName  = storage.getUserName()  ?? 'User';
+      final userEmail = storage.getUserEmail() ?? 'info@sevacare.com';
+      final userPhone = storage.getUserPhone() ?? '9876543210';
+
+      final options = <String, dynamic>{
+        'key':         Env.razorpayKey,
+        'amount':      upgradeModel.order.amount,
+        'currency':    upgradeModel.order.currency,
+        'name':        'Seva Care',
+        'description': upgradeModel.plan.name,
+        'order_id':    upgradeModel.order.id,
+        'prefill': {
+          'name':    userName,
+          'email':   userEmail,
+          'contact': userPhone,
+        },
+        'theme': {
+          'color': '#3F51B5',
+        },
+      };
+
+      AppLogger.i('Razorpay checkout opened');
+      _razorpay.open(options);
+
+    } catch (e, st) {
+      AppLogger.e('Upgrade flow initiation failed', e, st);
+      // Surface the real backend error message
+      String errorMsg = e.toString();
+      if (errorMsg.startsWith('Exception: ')) {
+        errorMsg = errorMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errorMsg.isNotEmpty ? errorMsg : 'Unable to initiate upgrade. Please try again.');
+      if (mounted) {
+        setState(() {
+          _paymentLoading = false;
+          _paymentLoadingText = null;
+          _activeUpgradeSubscriptionId = null;
+          _activeBackendPaymentId = null;
+        });
+      }
+    }
+  }
+
+  /// Shows an informational dialog for scheduled plan changes (e.g. downgrade).
+  void _showScheduledDialog(String message) {
+    if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(color: SevaColors.greenLight, shape: BoxShape.circle),
-                child: const Icon(Icons.check_circle, size: 54, color: SevaColors.green),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Payment Successful!',
-                style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary, height: 1.4),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _fetchSubscriptionData(isRefresh: true);
-                  },
-                  child: const Text('OK'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showFailureDialog(
-    String message,
-    String razorpayPaymentId,
-    String razorpayOrderId,
-    String razorpaySignature,
-    String planName,
-  ) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => WillPopScope(
-        onWillPop: () async => false,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          content: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(color: SevaColors.redLight, shape: BoxShape.circle),
-                  child: const Icon(Icons.error_outline, size: 54, color: SevaColors.red),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Verification Failed',
-                  style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary, height: 1.4),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                        },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        child: Text(
-                          'Cancel',
-                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: SevaColors.textSecondary),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _performVerification(razorpayPaymentId, razorpayOrderId, razorpaySignature, planName);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        child: Text(
-                          'Retry',
-                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showUpgradeDialog(BuildContext context, SubscriptionPlan plan) {
-    bool upgrading = false;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, dialogSetState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text('Upgrade to ${plan.name}?', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'You will be charged ${plan.price}${plan.period} starting from your next billing cycle.',
-                style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: SevaColors.greenLight, borderRadius: BorderRadius.circular(10)),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, size: 16, color: SevaColors.green),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'You can cancel anytime. Prorated refund available.',
-                        style: GoogleFonts.inter(fontSize: 12, color: SevaColors.green),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: upgrading ? null : () => Navigator.pop(ctx),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.inter(color: SevaColors.textSecondary),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: upgrading
-                  ? null
-                  : () async {
-                      dialogSetState(() => upgrading = true);
-                      AppLogger.i('Upgrade subscription started');
-                      AppLogger.i('Selected plan ID: ${plan.id}');
-
-                      final result = await _paymentService.purchaseSubscription(
-                        planId: plan.id,
-                      );
-
-                      if (ctx.mounted) {
-                        Navigator.pop(ctx);
-                      }
-
-                      switch (result) {
-                        case SubscriptionFreeEnrollmentSucceeded():
-                          AppLogger.i('Free subscription enrollment success');
-                          if (context.mounted) {
-                            _showSuccessDialog('Subscription activated successfully', plan.name);
-                          }
-                          break;
-
-                        case SubscriptionPaymentSucceeded(
-                            razorpayPaymentId: final paymentId,
-                            razorpayOrderId: final orderId,
-                            razorpaySignature: final signature,
-                          ):
-                          AppLogger.i('Payment succeeded. Initiating verification.');
-                          if (context.mounted) {
-                            _performVerification(paymentId, orderId, signature, plan.name);
-                          }
-                          break;
-
-                        case SubscriptionPaymentFailed(reason: final reason, message: final msg):
-                          AppLogger.e('Payment failed: $reason - $msg');
-                          _showErrorSnackbar(msg);
-                          break;
-
-                        case SubscriptionExternalWalletSelected(walletName: final wallet):
-                          AppLogger.i('External wallet selected: $wallet');
-                          _showErrorSnackbar('Selected external wallet: $wallet. Please complete payment.');
-                          break;
-                      }
-                    },
-              child: upgrading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Text('Confirm Upgrade'),
-            ),
+        title: Row(
+          children: [
+            const Icon(Icons.schedule, color: SevaColors.primary, size: 28),
+            const SizedBox(width: 8),
+            Text('Plan Change Scheduled', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 16)),
           ],
         ),
+        content: Text(
+          message,
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Got it',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary),
+            ),
+          ),
+        ],
       ),
     );
   }

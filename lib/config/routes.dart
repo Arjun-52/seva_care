@@ -27,6 +27,7 @@ import '../screens/aide/visit_summary_screen.dart';
 // Settings
 import '../screens/settings/settings_screen.dart';
 import '../screens/settings/help_support_screen.dart';
+import '../screens/settings/razorpay_test_screen.dart';
 
 import '../models/mock_data.dart'; // import for Senior type
 
@@ -116,6 +117,12 @@ class AppRoutes {
             builder: (context, state) => const HelpSupportScreen(),
           ),
         ],
+      ),
+
+      // ─── Razorpay Test Route ───────────────────
+      GoRoute(
+        path: '/razorpay-test',
+        builder: (context, state) => const RazorpayTestScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
