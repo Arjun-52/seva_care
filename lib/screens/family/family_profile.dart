@@ -8,6 +8,7 @@ import '../settings/settings_screen.dart';
 import '../settings/help_support_screen.dart';
 import 'family_documents.dart';
 import 'family_subscription.dart';
+import 'family_subscriptions_list.dart';
 import '../../core/storage/local_storage_service.dart';
 import '../../services/dependency_injection.dart';
 import '../../services/api_service.dart';
@@ -271,6 +272,10 @@ class _FamilyProfileState extends State<FamilyProfile> {
                 _divider(),
                 _settingsItem(Icons.payment, t('subscription'), () {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilySubscription()));
+                }),
+                _divider(),
+                _settingsItem(Icons.receipt_long_outlined, 'My Subscriptions', () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilySubscriptionsListScreen()));
                 }),
                 _divider(),
                 _settingsItem(Icons.notifications_outlined, t('notification_settings'), () {

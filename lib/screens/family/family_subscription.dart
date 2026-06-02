@@ -13,6 +13,7 @@ import '../../core/errors/failure.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../core/storage/local_storage_service.dart';
 import '../../config/env.dart';
+import 'receipt_screen.dart';
 
 
 
@@ -36,11 +37,13 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
   String? _paymentsError;
 
   late Razorpay _razorpay;
-  // Fields captured from POST /v1/subscriptions/upgrade
-  String? _activeUpgradeSubscriptionId; // subscriptionId
-  String? _activeBackendPaymentId;      // paymentId from upgrade response
+  // subscriptionId captured from POST /v1/subscriptions/upgrade
+  String? _activeUpgradeSubscriptionId;
   bool _paymentLoading = false;
   String? _paymentLoadingText;
+  bool _cancelLoading = false;
+  bool _refundLoading = false;
+  bool _cancelPaymentLoading = false;
 
   @override
   void initState() {
@@ -370,16 +373,19 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
     final formattedPrice = '₹${sub.priceInr}';
     final formattedPeriod = sub.period.toLowerCase() == 'monthly' ? ' /month' : ' /${sub.period}';
     final isActive = sub.status.toLowerCase() == 'active';
-    
+    final isCancelled = sub.status.toLowerCase() == 'cancelled';
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: SevaColors.sevaGradient,
+        gradient: isCancelled
+            ? LinearGradient(colors: [Colors.grey.shade600, Colors.grey.shade800], begin: Alignment.topLeft, end: Alignment.bottomRight)
+            : SevaColors.sevaGradient,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: SevaColors.primary.withAlpha(51),
+            color: (isCancelled ? Colors.grey : SevaColors.primary).withAlpha(51),
             blurRadius: 12,
             offset: const Offset(0, 4),
           )
@@ -400,7 +406,11 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: isActive ? SevaColors.green.withAlpha(51) : SevaColors.red.withAlpha(51),
+                color: isActive
+                    ? SevaColors.green.withAlpha(51)
+                    : isCancelled
+                        ? Colors.orange.withAlpha(80)
+                        : SevaColors.red.withAlpha(51),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -414,7 +424,9 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
         Text(sub.planName, style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.white)),
         const SizedBox(height: 4),
         Text(
-          'Active: ${_formatDate(sub.startDate)} | Renews: ${_formatDate(sub.endDate)}',
+          isCancelled
+              ? 'Cancelled • Access until: ${_formatDate(sub.endDate)}'
+              : 'Active: ${_formatDate(sub.startDate)} | Renews: ${_formatDate(sub.endDate)}',
           style: GoogleFonts.inter(fontSize: 12, color: Colors.white70),
         ),
         const SizedBox(height: 12),
@@ -422,6 +434,44 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
           Text(formattedPrice, style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white)),
           Text(formattedPeriod, style: GoogleFonts.inter(fontSize: 14, color: Colors.white60)),
         ]),
+        // Cancel button — only shown when subscription is active
+        if (isActive) ...[
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: _cancelLoading
+                ? const Center(child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                : OutlinedButton(
+                    onPressed: (_paymentLoading || _cancelLoading) ? null : () => _showCancelDialog(context),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white54, width: 1.2),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(
+                      'Cancel Subscription',
+                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+                    ),
+                  ),
+          ),
+        ],
+        if (isCancelled)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Colors.white60, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Your subscription is cancelled. You have access until the billing period ends.',
+                    style: GoogleFonts.inter(fontSize: 11, color: Colors.white60, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ]),
     );
   }
@@ -473,6 +523,8 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
         ),
       );
     }
+
+    final isSubCancelled = _currentSub != null && _currentSub!.status.toLowerCase() == 'cancelled';
 
     return Column(
       children: _plans.map((plan) {
@@ -558,17 +610,22 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
                       )
                     : Container(
                         decoration: BoxDecoration(
-                          gradient: isPopular ? SevaColors.sevaGradient : null,
+                          gradient: (isPopular && !isSubCancelled) ? SevaColors.sevaGradient : null,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: ElevatedButton(
-                          onPressed: () => _showUpgradeDialog(context, plan),
+                          onPressed: isSubCancelled ? null : () => _showUpgradeDialog(context, plan),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isPopular ? Colors.transparent : SevaColors.primary,
+                            backgroundColor: isPopular
+                                ? (isSubCancelled ? Colors.grey.shade300 : Colors.transparent)
+                                : (isSubCancelled ? Colors.grey.shade300 : SevaColors.primary),
                             shadowColor: Colors.transparent,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
-                          child: Text('Upgrade to ${plan.name}', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                          child: Text(
+                            isSubCancelled ? 'Unavailable' : 'Upgrade to ${plan.name}',
+                            style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: isSubCancelled ? Colors.grey.shade500 : Colors.white),
+                          ),
                         ),
                       ),
                   ),
@@ -716,6 +773,11 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
         textColor = Colors.grey.shade600;
         label = 'Cancelled';
         break;
+      case 'refunded':
+        bgColor = Colors.blue.shade50;
+        textColor = Colors.blue.shade700;
+        label = 'Refunded';
+        break;
       default:
         bgColor = Colors.grey.shade100;
         textColor = Colors.grey.shade600;
@@ -738,9 +800,8 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
 
   String _formatDateTime(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
-    const months = ['Jun', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    // Let's safe guard the month name mapping
-    final monthName = date.month >= 1 && date.month <= 12 ? months[date.month - 1] : 'Jun';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final monthName = date.month >= 1 && date.month <= 12 ? months[date.month - 1] : 'Jan';
     final year = date.year;
     
     int hour = date.hour;
@@ -756,56 +817,147 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
 
   Widget _paymentRow(PaymentHistoryModel payment) {
     final isSuccess = payment.status.toLowerCase() == 'paid' || payment.status.toLowerCase() == 'success';
+    final isRefunded = payment.status.toLowerCase() == 'refunded';
+    final isPending = payment.status.toLowerCase() == 'pending';
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: isSuccess ? SevaColors.greenLight : SevaColors.orangeLight,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              isSuccess ? Icons.check_circle : Icons.pending,
-              size: 18,
-              color: isSuccess ? SevaColors.green : SevaColors.orange,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  payment.planName,
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.textPrimary),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'ID: ${payment.id}',
-                  style: GoogleFonts.inter(fontSize: 10, color: SevaColors.textTertiary),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _formatDateTime(payment.createdAt),
-                  style: GoogleFonts.inter(fontSize: 11, color: SevaColors.textSecondary, height: 1.3),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '${payment.currency == 'INR' ? '₹' : payment.currency}${payment.amount}',
-                style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: isSuccess
+                      ? SevaColors.greenLight
+                      : isRefunded
+                          ? Colors.blue.shade50
+                          : SevaColors.orangeLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  isSuccess
+                      ? Icons.check_circle
+                      : isRefunded
+                          ? Icons.keyboard_return
+                          : Icons.pending,
+                  size: 18,
+                  color: isSuccess
+                      ? SevaColors.green
+                      : isRefunded
+                          ? Colors.blue
+                          : SevaColors.orange,
+                ),
               ),
-              const SizedBox(height: 6),
-              _buildStatusBadge(payment.status),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      payment.planName,
+                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.textPrimary),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'ID: ${payment.id}',
+                      style: GoogleFonts.inter(fontSize: 10, color: SevaColors.textTertiary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatDateTime(payment.createdAt),
+                      style: GoogleFonts.inter(fontSize: 11, color: SevaColors.textSecondary, height: 1.3),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${payment.currency == 'INR' ? '₹' : payment.currency}${payment.amount}',
+                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
+                  ),
+                  const SizedBox(height: 6),
+                  _buildStatusBadge(payment.status),
+                ],
+              ),
             ],
           ),
+          if (isSuccess || isRefunded) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 48, top: 8),
+              child: Row(
+                children: [
+                  if (isSuccess) ...[
+                    SizedBox(
+                      height: 28,
+                      child: TextButton.icon(
+                        onPressed: (_paymentLoading || _cancelLoading || _refundLoading || _cancelPaymentLoading)
+                            ? null
+                            : () => _showRefundDialog(context, payment),
+                        icon: const Icon(Icons.keyboard_return, size: 14, color: SevaColors.primary),
+                        label: Text(
+                          'Request Refund',
+                          style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SevaColors.primary),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  SizedBox(
+                    height: 28,
+                    child: TextButton.icon(
+                      onPressed: (_paymentLoading || _cancelLoading || _refundLoading || _cancelPaymentLoading)
+                          ? null
+                          : () => _fetchAndOpenReceipt(context, payment),
+                      icon: const Icon(Icons.receipt_outlined, size: 14, color: SevaColors.primary),
+                      label: Text(
+                        'View Receipt',
+                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SevaColors.primary),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (isPending) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 48, top: 8),
+              child: SizedBox(
+                height: 28,
+                child: TextButton.icon(
+                  onPressed: (_paymentLoading || _cancelLoading || _refundLoading || _cancelPaymentLoading)
+                      ? null
+                      : () => _showCancelPaymentDialog(context, payment),
+                  icon: const Icon(Icons.cancel_outlined, size: 14, color: SevaColors.red),
+                  label: Text(
+                    'Cancel Payment',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SevaColors.red),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -818,7 +970,7 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('Upgrade to ${plan.name}?', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
         content: Text(
-          'Would you like to upgrade your subscription to ${plan.name}?',
+          'Would you like to upgrade your subscription to ${plan.name}? You can create the plan directly or proceed to payment.',
           style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
         ),
         actions: [
@@ -832,16 +984,64 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
+              _createNewSubscription(plan);
+            },
+            child: Text(
+              'Create Plan',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
               _startUpgradeFlow(plan);
             },
             child: Text(
-              'Upgrade',
-              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary),
+              'Pay Now',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: SevaColors.primary),
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Calls the repository to create a new subscription plan and handles loading, success, and error states.
+  Future<void> _createNewSubscription(SubscriptionPlan plan) async {
+    if (_paymentLoading) return;
+    setState(() {
+      _paymentLoading = true;
+      _paymentLoadingText = 'Creating subscription...';
+    });
+
+    AppLogger.i('[CreateSubscription] Calling POST /v1/subscriptions with planId: ${plan.id}');
+    try {
+      final sub = await locator<SubscriptionRepository>().createSubscription(planId: plan.id);
+      AppLogger.i('[CreateSubscription] Subscription created successfully: ${sub.id}');
+
+      // Store returned data
+      final storage = locator<LocalStorageService>();
+      await storage.saveRememberMe(true); // Keep active session indicator
+
+      _showSuccessDialog('Subscription Created', 'Subscription for ${plan.name} has been created successfully!');
+
+      // Refresh current subscription details UI automatically
+      await _fetchSubscriptionData(isRefresh: true);
+    } catch (e, st) {
+      AppLogger.e('[CreateSubscription] Failed', e, st);
+      String errorMsg = e.toString();
+      if (errorMsg.startsWith('Exception: ')) {
+        errorMsg = errorMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errorMsg.isNotEmpty ? errorMsg : 'Failed to create subscription');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _paymentLoading = false;
+          _paymentLoadingText = null;
+        });
+      }
+    }
   }
 
   void _showInfoSnackbar(String message) {
@@ -886,101 +1086,111 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) {
-    // Capture all fields required for POST /v1/subscriptions/verify-payment
     final razorpayPaymentId = response.paymentId ?? '';
     final razorpayOrderId   = response.orderId   ?? '';
     final razorpaySignature = response.signature ?? '';
     final subscriptionId    = _activeUpgradeSubscriptionId ?? '';
-    final backendPaymentId  = _activeBackendPaymentId      ?? '';
 
     AppLogger.i(
-      'Payment success:\n'
-      '  razorpayPaymentId : $razorpayPaymentId\n'
-      '  razorpayOrderId   : $razorpayOrderId\n'
-      '  razorpaySignature : $razorpaySignature\n'
-      '  subscriptionId    : $subscriptionId\n'
-      '  backendPaymentId  : $backendPaymentId',
+      '[Razorpay] Payment SUCCESS callback received:\n'
+      '  razorpay_payment_id : $razorpayPaymentId\n'
+      '  razorpay_order_id   : $razorpayOrderId\n'
+      '  razorpay_signature  : $razorpaySignature\n'
+      '  subscriptionId      : $subscriptionId',
     );
 
     if (subscriptionId.isEmpty) {
-      AppLogger.e('No active subscription ID found for verification');
-      _showErrorSnackbar('Verification error: missing subscription ID.');
+      AppLogger.e('[Razorpay] Cannot verify — subscriptionId is missing');
+      _showErrorSnackbar('Verification error: missing subscription ID. Please contact support.');
+      if (mounted) setState(() { _paymentLoading = false; _paymentLoadingText = null; });
       return;
     }
 
+    if (razorpayPaymentId.isEmpty) {
+      AppLogger.e('[Razorpay] Cannot verify — razorpay_payment_id is missing');
+      _showErrorSnackbar('Verification error: missing payment ID. Please contact support.');
+      if (mounted) setState(() { _paymentLoading = false; _paymentLoadingText = null; });
+      return;
+    }
+
+    AppLogger.i('[Razorpay] Proceeding to verify-payment API');
     _verifyPayment(
       subscriptionId: subscriptionId,
       razorpayPaymentId: razorpayPaymentId,
-      razorpayOrderId: razorpayOrderId,
-      razorpaySignature: razorpaySignature,
-      backendPaymentId: backendPaymentId,
     );
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    AppLogger.e('Payment failure: code=${response.code}, message=${response.message}');
-    setState(() {
-      _paymentLoading = false;
-      _paymentLoadingText = null;
-    });
-    
+    AppLogger.e(
+      '[Razorpay] Payment FAILURE callback received:\n'
+      '  code    : ${response.code}\n'
+      '  message : ${response.message}',
+    );
+    if (mounted) {
+      setState(() {
+        _paymentLoading = false;
+        _paymentLoadingText = null;
+        _activeUpgradeSubscriptionId = null;
+      });
+    }
     if (response.code == 2) {
-      _showInfoSnackbar("Payment cancelled by user.");
+      _showInfoSnackbar('Payment cancelled.');
     } else {
-      _showErrorSnackbar("Payment failed. Please try again.");
+      _showErrorSnackbar('Payment failed: ${response.message ?? "Please try again."}');
     }
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
-    AppLogger.i('External wallet selected: ${response.walletName}');
-    setState(() {
-      _paymentLoading = false;
-      _paymentLoadingText = null;
-    });
+    AppLogger.i('[Razorpay] External wallet selected: ${response.walletName}');
+    if (mounted) {
+      setState(() {
+        _paymentLoading = false;
+        _paymentLoadingText = null;
+        _activeUpgradeSubscriptionId = null;
+      });
+    }
   }
 
   Future<void> _verifyPayment({
     required String subscriptionId,
     required String razorpayPaymentId,
-    required String razorpayOrderId,
-    required String razorpaySignature,
-    required String backendPaymentId,
   }) async {
     setState(() {
       _paymentLoading = true;
       _paymentLoadingText = 'Verifying payment...';
     });
+
     AppLogger.i(
-      'Verification payload:\n'
+      '[VerifyPayment] Calling POST /v1/subscriptions/verify-payment:\n'
       '  subscriptionId    : $subscriptionId\n'
-      '  razorpayPaymentId : $razorpayPaymentId\n'
-      '  razorpayOrderId   : $razorpayOrderId\n'
-      '  razorpaySignature : $razorpaySignature\n'
-      '  backendPaymentId  : $backendPaymentId',
+      '  razorpayPaymentId : $razorpayPaymentId',
     );
 
     try {
-      final success = await locator<SubscriptionRepository>().verifySubscriptionPayment(
+      final verified = await locator<SubscriptionRepository>().verifySubscriptionPayment(
         subscriptionId: subscriptionId,
         razorpayPaymentId: razorpayPaymentId,
-        razorpayOrderId: razorpayOrderId,
-        razorpaySignature: razorpaySignature,
-        backendPaymentId: backendPaymentId,
       );
-      if (success) {
-        AppLogger.i('Verification success');
-        setState(() {
-          _paymentLoadingText = 'Refreshing subscription...';
-        });
+
+      AppLogger.i('[VerifyPayment] Response received — verified: $verified');
+
+      if (verified) {
+        // ── Payment confirmed ─────────────────────────────────────────────
+        AppLogger.i('[VerifyPayment] Payment verified. Refreshing subscription...');
+        setState(() { _paymentLoadingText = 'Refreshing subscription...'; });
         await _fetchSubscriptionData(isRefresh: true);
-        AppLogger.i('Current subscription refreshed');
-        _showSuccessDialog('Success', 'Subscription upgraded successfully!');
+        AppLogger.i('[VerifyPayment] Subscription refreshed successfully');
+        _showSuccessDialog('Payment Successful', 'Your subscription has been upgraded successfully!');
       } else {
-        AppLogger.e('Verification failure');
-        _showErrorSnackbar('Payment verification failed. Please contact support.');
+        // ── verified: false ───────────────────────────────────────────────
+        AppLogger.e('[VerifyPayment] Backend returned verified=false — subscription not activated');
+        _showErrorSnackbar(
+          'Payment verification pending. Your subscription will activate once confirmed. '
+          'If the amount was deducted, please contact support.',
+        );
       }
     } catch (e, st) {
-      AppLogger.e('Verification failure with error', e, st);
+      AppLogger.e('[VerifyPayment] Exception during verification', e, st);
       _showErrorSnackbar('Verification failed. Please contact support.');
     } finally {
       if (mounted) {
@@ -988,7 +1198,6 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
           _paymentLoading = false;
           _paymentLoadingText = null;
           _activeUpgradeSubscriptionId = null;
-          _activeBackendPaymentId = null;
         });
       }
     }
@@ -997,21 +1206,19 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
   Future<void> _startUpgradeFlow(SubscriptionPlan plan) async {
     if (_loading || _paymentLoading) return;
 
-    AppLogger.i('Selected plan: ${plan.name} | planId: ${plan.id}');
+    AppLogger.i('[Upgrade] Plan selected: "${plan.name}" | planId: ${plan.id}');
     setState(() {
       _paymentLoading = true;
       _paymentLoadingText = 'Initiating upgrade...';
     });
 
     try {
-      AppLogger.i('Upgrade request started');
+      AppLogger.i('[Upgrade] Calling POST /v1/subscriptions/upgrade');
       final result = await locator<SubscriptionRepository>().upgradeSubscription(plan.id);
 
       // ── Case 1: Scheduled downgrade ─────────────────────────────────────
-      // Backend accepted the request but will apply it next billing cycle.
-      // No Razorpay order was created — just show the backend message.
       if (!result.isImmediate) {
-        AppLogger.i('Upgrade scheduled: ${result.message}');
+        AppLogger.i('[Upgrade] Scheduled response received: ${result.message}');
         if (mounted) {
           setState(() {
             _paymentLoading = false;
@@ -1025,17 +1232,16 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
       // ── Case 2: Immediate checkout ──────────────────────────────────────
       final upgradeModel = result.order!;
       AppLogger.i(
-        'Upgrade response received — immediate checkout:\n'
-        '  subscriptionId   : ${upgradeModel.subscriptionId}\n'
-        '  backendPaymentId : ${upgradeModel.paymentId}\n'
-        '  orderId          : ${upgradeModel.order.id}\n'
-        '  amount           : ${upgradeModel.order.amount}\n'
-        '  plan             : ${upgradeModel.plan.name}',
+        '[Upgrade] Upgrade response received — opening Razorpay:\n'
+        '  subscriptionId : ${upgradeModel.subscriptionId}\n'
+        '  order_id       : ${upgradeModel.order.id}\n'
+        '  amount (paise) : ${upgradeModel.order.amount}\n'
+        '  currency       : ${upgradeModel.order.currency}\n'
+        '  plan           : ${upgradeModel.plan.name}',
       );
 
-      // Store both IDs from the upgrade response — needed for verify-payment
+      // Store subscriptionId — this is the ONLY field needed for verify-payment
       _activeUpgradeSubscriptionId = upgradeModel.subscriptionId;
-      _activeBackendPaymentId = upgradeModel.paymentId;
 
       final storage = locator<LocalStorageService>();
       final userName  = storage.getUserName()  ?? 'User';
@@ -1059,12 +1265,11 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
         },
       };
 
-      AppLogger.i('Razorpay checkout opened');
+      AppLogger.i('[Razorpay] Opening checkout — order_id: ${upgradeModel.order.id}, amount: ${upgradeModel.order.amount}');
       _razorpay.open(options);
 
     } catch (e, st) {
-      AppLogger.e('Upgrade flow initiation failed', e, st);
-      // Surface the real backend error message
+      AppLogger.e('[Upgrade] Flow failed', e, st);
       String errorMsg = e.toString();
       if (errorMsg.startsWith('Exception: ')) {
         errorMsg = errorMsg.replaceFirst('Exception: ', '');
@@ -1075,7 +1280,6 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
           _paymentLoading = false;
           _paymentLoadingText = null;
           _activeUpgradeSubscriptionId = null;
-          _activeBackendPaymentId = null;
         });
       }
     }
@@ -1111,4 +1315,250 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
       ),
     );
   }
+
+  /// Shows the cancellation confirmation dialog.
+  void _showCancelDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Cancel Subscription', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 18, color: SevaColors.textPrimary)),
+        content: Text(
+          'Are you sure you want to cancel your subscription? Your access will remain active until the current billing cycle ends.',
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Keep Subscription', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _cancelSubscription();
+            },
+            child: Text('Cancel Subscription', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Calls the repository to cancel the active subscription and handles loading, success, and error states.
+  Future<void> _cancelSubscription() async {
+    if (_cancelLoading) return;
+    setState(() {
+      _cancelLoading = true;
+    });
+
+    try {
+      final message = await locator<SubscriptionRepository>().cancelSubscription();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: SevaColors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      });
+      // Refresh current subscription API immediately
+      await _fetchSubscriptionData();
+    } catch (e) {
+      String errMsg = e.toString();
+      if (errMsg.startsWith('Exception: ')) {
+        errMsg = errMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errMsg.isNotEmpty ? errMsg : 'Something went wrong');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cancelLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Shows the refund confirmation dialog.
+  void _showRefundDialog(BuildContext context, PaymentHistoryModel payment) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Request Refund', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 18, color: SevaColors.textPrimary)),
+        content: Text(
+          'Are you sure you want to request a refund for this payment? This action may not be reversible.',
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _refundPayment(payment.id);
+            },
+            child: Text('Request Refund', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Calls the repository to request a refund for a payment and handles loading, success, and error states.
+  Future<void> _refundPayment(String paymentId) async {
+    if (_refundLoading) return;
+    setState(() {
+      _refundLoading = true;
+    });
+
+    try {
+      final success = await locator<SubscriptionRepository>().refundPayment(paymentId);
+      if (success) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Payment refunded successfully'),
+                backgroundColor: SevaColors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        });
+        // Refresh payment history and subscription information immediately
+        await _fetchSubscriptionData();
+      }
+    } catch (e) {
+      String errMsg = e.toString();
+      if (errMsg.startsWith('Exception: ')) {
+        errMsg = errMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errMsg.isNotEmpty ? errMsg : 'Something went wrong');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _refundLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Shows the cancel payment confirmation dialog.
+  void _showCancelPaymentDialog(BuildContext context, PaymentHistoryModel payment) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Cancel Payment', style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 18, color: SevaColors.textPrimary)),
+        content: Text(
+          'Are you sure you want to cancel this pending payment?',
+          style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Keep Payment', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _cancelPayment(payment.id);
+            },
+            child: Text('Cancel Payment', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: SevaColors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Calls the repository to cancel a pending payment and handles loading, success, and error states.
+  Future<void> _cancelPayment(String paymentId) async {
+    if (_cancelPaymentLoading) return;
+    setState(() {
+      _cancelPaymentLoading = true;
+    });
+
+    try {
+      final success = await locator<SubscriptionRepository>().cancelPayment(paymentId);
+      if (success) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Payment cancelled successfully'),
+                backgroundColor: SevaColors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        });
+        // Refresh payment history and subscription information immediately
+        await _fetchSubscriptionData();
+      }
+    } catch (e) {
+      String errMsg = e.toString();
+      if (errMsg.startsWith('Exception: ')) {
+        errMsg = errMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errMsg.isNotEmpty ? errMsg : 'Something went wrong');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cancelPaymentLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Fetches the HTML receipt from the repository and opens the dedicated ReceiptScreen.
+  Future<void> _fetchAndOpenReceipt(BuildContext context, PaymentHistoryModel payment) async {
+    if (_paymentLoading) return;
+    setState(() {
+      _paymentLoading = true;
+      _paymentLoadingText = 'Fetching receipt...';
+    });
+
+    try {
+      final html = await locator<SubscriptionRepository>().getPaymentReceipt(payment.id);
+      if (html == null || html.isEmpty) {
+        throw Exception('Receipt data is empty or missing');
+      }
+
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReceiptScreen(
+              paymentId: payment.id,
+              htmlContent: html,
+              planName: payment.planName,
+              status: payment.status,
+              amount: payment.amount,
+              currency: payment.currency,
+              date: payment.createdAt,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      String errMsg = e.toString();
+      if (errMsg.startsWith('Exception: ')) {
+        errMsg = errMsg.replaceFirst('Exception: ', '');
+      }
+      _showErrorSnackbar(errMsg.isNotEmpty ? errMsg : 'Failed to load receipt');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _paymentLoading = false;
+          _paymentLoadingText = null;
+        });
+      }
+    }
+  }
 }
+
