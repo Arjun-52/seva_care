@@ -7,11 +7,12 @@ import '../../core/api/api_client.dart';
 import '../../services/dependency_injection.dart';
 import '../../utils/app_logger.dart';
 import '../../models/current_subscription_model.dart';
-import '../../models/upgrade_subscription_model.dart';
-import 'family_payment_screen.dart';
 import '../../models/payment_history_model.dart';
 import '../../repositories/subscription_repository.dart';
 import '../../core/errors/failure.dart';
+import '../../services/subscription_payment_service.dart';
+import '../../models/subscription/subscription_payment_result.dart';
+import '../../core/storage/local_storage_service.dart';
 
 
 
@@ -35,14 +36,19 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
   String? _paymentsError;
 
 
+  late SubscriptionPaymentService _paymentService;
+
   @override
   void initState() {
     super.initState();
+    _paymentService = locator<SubscriptionPaymentService>();
+    _paymentService.init();
     _fetchSubscriptionData();
   }
 
   @override
   void dispose() {
+    _paymentService.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -767,6 +773,227 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
     );
   }
 
+  void _performVerification(
+    String razorpayPaymentId,
+    String razorpayOrderId,
+    String razorpaySignature,
+    String planName,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => WillPopScope(
+        onWillPop: () async => false, // Disable back navigation
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          content: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: SevaColors.primary),
+                const SizedBox(height: 20),
+                Text(
+                  'Verifying payment...',
+                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: SevaColors.textPrimary),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    _callVerifyPaymentApi(razorpayPaymentId, razorpayOrderId, razorpaySignature, planName);
+  }
+
+  Future<void> _callVerifyPaymentApi(
+    String razorpayPaymentId,
+    String razorpayOrderId,
+    String razorpaySignature,
+    String planName,
+  ) async {
+    try {
+      final repo = locator<SubscriptionRepository>();
+      final result = await repo.verifySubscriptionPayment(
+        subscriptionId: razorpayOrderId,
+        razorpayPaymentId: razorpayPaymentId,
+        razorpayOrderId: razorpayOrderId,
+        razorpaySignature: razorpaySignature,
+      );
+
+      // Close the verifying payment dialog
+      if (mounted) {
+        Navigator.pop(context);
+      }
+
+      if (result.verified) {
+        // Success flow: Store keys in LocalStorage
+        final storage = locator<LocalStorageService>();
+        await storage.setString('activeSubscriptionId', razorpayOrderId);
+        await storage.setString('activePlanName', planName);
+        await storage.setString('activePlanStatus', 'active');
+        await storage.setString('activationDate', DateTime.now().toIso8601String());
+
+        AppLogger.i('Payment verified successfully');
+        _showSuccessDialog('Subscription activated successfully', planName);
+      } else {
+        AppLogger.e('Verification failed');
+        _showFailureDialog(
+          'Payment verification failed. Please contact support if amount was deducted.',
+          razorpayPaymentId,
+          razorpayOrderId,
+          razorpaySignature,
+          planName,
+        );
+      }
+    } catch (e, stack) {
+      // Close the loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+      }
+
+      String errorMsg = 'Payment verification failed. Please try again.';
+      if (e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
+        errorMsg = 'Unable to verify payment. Please check your internet connection.';
+      }
+      AppLogger.e('Payment verification failed', e, stack);
+      _showFailureDialog(
+        errorMsg,
+        razorpayPaymentId,
+        razorpayOrderId,
+        razorpaySignature,
+        planName,
+      );
+    }
+  }
+
+  void _showSuccessDialog(String message, String planName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(color: SevaColors.greenLight, shape: BoxShape.circle),
+                child: const Icon(Icons.check_circle, size: 54, color: SevaColors.green),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Payment Successful!',
+                style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary, height: 1.4),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _fetchSubscriptionData(isRefresh: true);
+                  },
+                  child: const Text('OK'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFailureDialog(
+    String message,
+    String razorpayPaymentId,
+    String razorpayOrderId,
+    String razorpaySignature,
+    String planName,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => WillPopScope(
+        onWillPop: () async => false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          content: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(color: SevaColors.redLight, shape: BoxShape.circle),
+                  child: const Icon(Icons.error_outline, size: 54, color: SevaColors.red),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Verification Failed',
+                  style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: SevaColors.textPrimary),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary, height: 1.4),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text(
+                          'Cancel',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: SevaColors.textSecondary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _performVerification(razorpayPaymentId, razorpayOrderId, razorpaySignature, planName);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text(
+                          'Retry',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showUpgradeDialog(BuildContext context, SubscriptionPlan plan) {
     bool upgrading = false;
 
@@ -820,59 +1047,42 @@ class _FamilySubscriptionState extends State<FamilySubscription> {
                       AppLogger.i('Upgrade subscription started');
                       AppLogger.i('Selected plan ID: ${plan.id}');
 
-                      try {
-                        final res = await locator<ApiClient>().post(
-                          'subscriptions/upgrade',
-                          body: {'planId': plan.id},
-                        );
+                      final result = await _paymentService.purchaseSubscription(
+                        planId: plan.id,
+                      );
 
-                        if (res.success && res.data != null) {
-                          AppLogger.i('Upgrade API success');
-                          final upgradeModel = UpgradeSubscriptionModel.fromJson(
-                            res.data as Map<String, dynamic>,
-                          );
-                          AppLogger.i('Subscription ID received: ${upgradeModel.subscriptionId}');
-                          AppLogger.i('Payment ID received: ${upgradeModel.paymentId}');
-                          AppLogger.i('Order ID received: ${upgradeModel.order.id}');
+                      if (ctx.mounted) {
+                        Navigator.pop(ctx);
+                      }
 
-                          if (ctx.mounted) {
-                            Navigator.pop(ctx);
-                          }
-
-                          AppLogger.i('Navigation to payment screen');
+                      switch (result) {
+                        case SubscriptionFreeEnrollmentSucceeded():
+                          AppLogger.i('Free subscription enrollment success');
                           if (context.mounted) {
-                            final paymentSuccess = await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => FamilyPaymentScreen(
-                                  orderId: upgradeModel.order.id,
-                                  amount: upgradeModel.order.amount,
-                                  currency: upgradeModel.order.currency,
-                                  subscriptionId: upgradeModel.subscriptionId,
-                                  paymentId: upgradeModel.paymentId,
-                                  planName: plan.name,
-                                ),
-                              ),
-                            );
-
-                            if (paymentSuccess == true) {
-                              _fetchSubscriptionData();
-                            }
+                            _showSuccessDialog('Subscription activated successfully', plan.name);
                           }
-                        } else {
-                          AppLogger.e('API failure: ${res.errorMessage}');
-                          String displayError = res.errorMessage;
-                          _showErrorSnackbar(displayError);
-                          dialogSetState(() => upgrading = false);
-                        }
-                      } catch (e, stack) {
-                        AppLogger.e('API failure', e, stack);
-                        String displayError = 'Unable to initiate subscription. Please try again.';
-                        if (e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
-                          displayError = 'Unable to connect. Please check your internet connection.';
-                        }
-                        _showErrorSnackbar(displayError);
-                        dialogSetState(() => upgrading = false);
+                          break;
+
+                        case SubscriptionPaymentSucceeded(
+                            razorpayPaymentId: final paymentId,
+                            razorpayOrderId: final orderId,
+                            razorpaySignature: final signature,
+                          ):
+                          AppLogger.i('Payment succeeded. Initiating verification.');
+                          if (context.mounted) {
+                            _performVerification(paymentId, orderId, signature, plan.name);
+                          }
+                          break;
+
+                        case SubscriptionPaymentFailed(reason: final reason, message: final msg):
+                          AppLogger.e('Payment failed: $reason - $msg');
+                          _showErrorSnackbar(msg);
+                          break;
+
+                        case SubscriptionExternalWalletSelected(walletName: final wallet):
+                          AppLogger.i('External wallet selected: $wallet');
+                          _showErrorSnackbar('Selected external wallet: $wallet. Please complete payment.');
+                          break;
                       }
                     },
               child: upgrading
