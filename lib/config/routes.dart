@@ -5,6 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../screens/splash_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/auth/register_screen.dart';
+
+// Admin
+import '../screens/admin/admin_home.dart';
 
 // Senior
 import '../screens/senior/senior_home.dart';
@@ -23,6 +27,7 @@ import '../screens/aide/visit_summary_screen.dart';
 // Settings
 import '../screens/settings/settings_screen.dart';
 import '../screens/settings/help_support_screen.dart';
+import '../screens/settings/razorpay_test_screen.dart';
 
 import '../models/mock_data.dart'; // import for Senior type
 
@@ -43,6 +48,16 @@ class AppRoutes {
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterScreen(),
+      ),
+      
+      // ─── Admin Module ──────────────────────────
+      GoRoute(
+        path: '/admin',
+        builder: (context, state) => const AdminHome(),
       ),
 
       // ─── Senior Module ─────────────────────────
@@ -102,6 +117,12 @@ class AppRoutes {
             builder: (context, state) => const HelpSupportScreen(),
           ),
         ],
+      ),
+
+      // ─── Razorpay Test Route ───────────────────
+      GoRoute(
+        path: '/razorpay-test',
+        builder: (context, state) => const RazorpayTestScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
