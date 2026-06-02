@@ -4,6 +4,7 @@ import '../core/storage/local_storage_service.dart';
 import '../core/api/api_client.dart';
 import '../repositories/subscription_repository.dart';
 import '../repositories/settings_repository.dart';
+import '../repositories/notification_repository.dart';
 import 'subscription_payment_service.dart';
 import 'websocket_service.dart';
 
@@ -26,6 +27,10 @@ Future<void> setupLocator() async {
   // ─── Settings Repository ──────────────
   final settingsRepo = SettingsRepository(apiClient);
   locator.registerSingleton<SettingsRepository>(settingsRepo);
+
+  // ─── Notification Repository ──────────
+  final notificationRepo = NotificationRepository(apiClient);
+  locator.registerSingleton<NotificationRepository>(notificationRepo);
 
   // ─── Subscription Payment Service ──────────
   final subPaymentService = SubscriptionPaymentService(subRepo);
