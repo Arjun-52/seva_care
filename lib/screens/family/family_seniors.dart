@@ -4,9 +4,10 @@ import '../../utils/theme.dart';
 import '../../widgets/seva_widgets.dart';
 import '../../models/mock_data.dart';
 import '../shared/senior_detail_screen.dart';
-import '../../core/api/api_client.dart';
 import '../../services/dependency_injection.dart';
 import '../../utils/app_logger.dart';
+import '../../repositories/senior_repository.dart';
+import 'add_senior_screen.dart';
 
 class FamilySeniors extends StatefulWidget {
   const FamilySeniors({super.key});
@@ -32,55 +33,42 @@ class _FamilySeniorsState extends State<FamilySeniors> {
     _fetchSeniors();
   }
 
-  Future<void> _fetchSeniors() async {
+  Future<void> _fetchSeniors({bool loadMore = false}) async {
+    if (_loading) return;
+    
     setState(() {
       _loading = true;
       _error = null;
     });
 
-    AppLogger.i('Fetch seniors started');
+    if (loadMore) {
+      AppLogger.i('Load more seniors started for page: ${_page + 1}');
+    } else {
+      AppLogger.i('Fetch initial seniors started');
+      _page = 1;
+    }
 
     try {
-      final result = await locator<ApiClient>().get('seniors');
+      final response = await locator<SeniorRepository>().getSeniors(page: loadMore ? _page + 1 : 1);
       
-      AppLogger.i('API response received');
-
-      if (result.success && result.data != null) {
-        final List<dynamic> dataList = result.data as List<dynamic>;
-        final fetchedSeniors = dataList.map((e) => Senior.fromJson(e as Map<String, dynamic>)).toList();
-
-        // Capture pagination metadata from result
-        if (result.pagination != null) {
-          final pagination = result.pagination!;
-          _page = pagination['page'] as int? ?? 1;
-          _limit = pagination['limit'] as int? ?? 20;
-          _total = pagination['total'] as int? ?? 0;
-          _totalPages = pagination['totalPages'] as int? ?? 0;
-        }
-
-        AppLogger.i('Seniors count loaded: ${fetchedSeniors.length} (Page: $_page/$_totalPages, Limit: $_limit, Total: $_total)');
-
-        if (fetchedSeniors.isEmpty) {
-          AppLogger.i('Empty list received');
-        }
-
-        if (mounted) {
-          setState(() {
-            _seniors = fetchedSeniors;
-          });
-        }
-      } else {
-        AppLogger.e('API error: ${result.errorMessage}');
-        if (mounted) {
-          setState(() {
-            _error = result.errorMessage;
-          });
-        }
-        _showErrorSnackbar(result.errorMessage);
+      if (mounted) {
+        setState(() {
+          if (loadMore) {
+            _seniors.addAll(response.seniors);
+            _page = response.page;
+          } else {
+            _seniors = response.seniors;
+            _page = 1;
+          }
+          _limit = response.limit;
+          _total = response.total;
+          _totalPages = response.totalPages;
+        });
       }
+      AppLogger.i('Seniors loaded successfully. Count: ${_seniors.length}, Total: $_total, Limit: $_limit');
     } catch (e, stack) {
-      AppLogger.e('API error', e, stack);
-      String displayError = 'Something went wrong. Please try again.';
+      AppLogger.e('Seniors load failed', e, stack);
+      String displayError = e.toString().replaceFirst('Exception: ', '');
       if (e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
         displayError = 'Unable to connect. Please check your internet connection.';
       }
@@ -96,6 +84,16 @@ class _FamilySeniorsState extends State<FamilySeniors> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _navigateToAddSenior() async {
+    final success = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddSeniorScreen()),
+    );
+    if (success == true) {
+      _fetchSeniors();
     }
   }
 
@@ -120,12 +118,7 @@ class _FamilySeniorsState extends State<FamilySeniors> {
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Contact support to add a new senior to your plan.'),
-                behavior: SnackBarBehavior.floating,
-              ));
-            },
+            onPressed: _navigateToAddSenior,
           ),
         ],
       ),
@@ -203,12 +196,7 @@ class _FamilySeniorsState extends State<FamilySeniors> {
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Contact support to add a new senior to your plan.'),
-                    behavior: SnackBarBehavior.floating,
-                  ));
-                },
+                onPressed: _navigateToAddSenior,
                 icon: const Icon(Icons.person_add_outlined),
                 label: const Text('Add Senior'),
               ),
@@ -218,11 +206,36 @@ class _FamilySeniorsState extends State<FamilySeniors> {
       );
     }
 
+    final showLoadMore = _page < _totalPages;
+
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(20),
-      itemCount: _seniors.length,
+      itemCount: _seniors.length + (showLoadMore ? 1 : 0),
       itemBuilder: (context, i) {
+        if (i == _seniors.length) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: SizedBox(
+              height: 48,
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _loading ? null : () => _fetchSeniors(loadMore: true),
+                icon: _loading
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: SevaColors.primary))
+                    : const Icon(Icons.expand_more, size: 18),
+                label: Text(
+                  _loading ? 'Loading...' : 'Load More Seniors',
+                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.primary),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: SevaColors.primary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+          );
+        }
         final s = _seniors[i];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
