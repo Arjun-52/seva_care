@@ -5,6 +5,7 @@ import '../../utils/theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/seva_widgets.dart';
 import '../../models/mock_data.dart';
+import 'vital_alerts_screen.dart';
 
 class FamilyVitals extends StatelessWidget {
   const FamilyVitals({super.key});
@@ -16,7 +17,22 @@ class FamilyVitals extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: SevaColors.background,
-      appBar: AppBar(title: Text(t('vitals_monitor'))),
+      appBar: AppBar(
+        title: Text(t('vitals_monitor')),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_active_outlined),
+            tooltip: 'Vital Alerts',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const VitalAlertsScreen()),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

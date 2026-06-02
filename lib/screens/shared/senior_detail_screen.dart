@@ -5,6 +5,7 @@ import '../../widgets/seva_widgets.dart';
 import '../../models/mock_data.dart';
 import '../../models/senior_details_model.dart';
 import '../../models/senior_vital_history_model.dart';
+import '../../models/latest_vitals_model.dart';
 import '../../services/dependency_injection.dart';
 import '../../repositories/senior_repository.dart';
 import '../../utils/app_logger.dart';
@@ -24,6 +25,7 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
   String? _error;
   SeniorDetailsModel? _details;
   List<SeniorVitalHistoryModel>? _vitalsHistory;
+  LatestVitalsModel? _latestVitals;
 
   @override
   void initState() {
@@ -41,15 +43,17 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
       final results = await Future.wait([
         locator<SeniorRepository>().getSeniorById(widget.senior.id),
         locator<SeniorRepository>().getSeniorVitalsHistory(widget.senior.id),
+        locator<SeniorRepository>().getLatestVitals(widget.senior.id),
       ]);
       
       if (mounted) {
         setState(() {
           _details = results[0] as SeniorDetailsModel;
           _vitalsHistory = results[1] as List<SeniorVitalHistoryModel>;
+          _latestVitals = results[2] as LatestVitalsModel?;
         });
       }
-      AppLogger.i('Senior details and history fetched successfully for: ${widget.senior.id}');
+      AppLogger.i('Senior details, history and latest vitals fetched successfully for: ${widget.senior.id}');
     } catch (e, stack) {
       AppLogger.e('Failed to fetch senior details', e, stack);
       String errMsg = e.toString().replaceFirst('Exception: ', '');
@@ -223,20 +227,20 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
     );
 
     // Get latest vitals if available
-    final latestVital = d.vitals.isNotEmpty ? d.vitals.first : null;
+    final latestVital = _latestVitals;
     final bpText = latestVital != null && latestVital.bpSystolic != null && latestVital.bpDiastolic != null
         ? '${latestVital.bpSystolic}/${latestVital.bpDiastolic}'
-        : widget.senior.vitals['bp'] ?? 'N/A';
+        : '--';
     final spo2Text = latestVital != null && latestVital.spo2 != null
         ? '${latestVital.spo2}%'
-        : widget.senior.vitals['spo2'] != null ? '${widget.senior.vitals['spo2']}%' : 'N/A';
+        : '--';
     final hrText = latestVital != null && latestVital.heartRate != null
         ? '${latestVital.heartRate} bpm'
-        : widget.senior.vitals['heartRate']?.toString() != null ? '${widget.senior.vitals['heartRate']} bpm' : 'N/A';
+        : '--';
     final tempText = latestVital != null && latestVital.temperature != null
         ? '${latestVital.temperature}°F'
-        : widget.senior.vitals['temp']?.toString() != null ? '${widget.senior.vitals['temp']}°F' : 'N/A';
-    final sugarText = latestVital?.bloodSugar != null ? '${latestVital!.bloodSugar} mg/dL' : 'N/A';
+        : '--';
+    final sugarText = latestVital?.bloodSugar != null ? '${latestVital!.bloodSugar} mg/dL' : '--';
 
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -335,27 +339,49 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
                     icon: Icons.thermostat, color: SevaColors.orange, bgColor: SevaColors.orangeLight),
                 ],
               ),
-              if (latestVital?.bloodSugar != null) ...[
-                const SizedBox(height: 12),
-                SevaCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.water_drop, color: SevaColors.rose, size: 20),
-                      const SizedBox(width: 12),
-                      Text('Blood Sugar:', style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary)),
-                      const SizedBox(width: 8),
-                      Text(sugarText, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.rose)),
-                      const Spacer(),
-                      if (latestVital?.recordedAt != null)
-                        Text(
-                          'Recorded ${latestVital!.recordedAt.hour}:${latestVital.recordedAt.minute.toString().padLeft(2, '0')}',
-                          style: GoogleFonts.inter(fontSize: 11, color: SevaColors.textTertiary),
-                        ),
+              const SizedBox(height: 12),
+              SevaCard(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.water_drop, color: SevaColors.rose, size: 20),
+                        const SizedBox(width: 12),
+                        Text('Blood Sugar:', style: GoogleFonts.inter(fontSize: 13, color: SevaColors.textSecondary)),
+                        const SizedBox(width: 8),
+                        Text(sugarText, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.rose)),
+                        const Spacer(),
+                        if (latestVital?.source != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: SevaColors.primaryLight,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'Source: ${latestVital!.source}',
+                              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: SevaColors.primary),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (latestVital != null) ...[
+                      const Divider(height: 20, color: SevaColors.divider),
+                      Row(
+                        children: [
+                          const Icon(Icons.access_time, color: SevaColors.textTertiary, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Recorded: ${_formatDate(latestVital.recordedAt)}',
+                            style: GoogleFonts.inter(fontSize: 11, color: SevaColors.textSecondary),
+                          ),
+                        ],
+                      ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
+              ),
               const SizedBox(height: 24),
 
               // Health Conditions

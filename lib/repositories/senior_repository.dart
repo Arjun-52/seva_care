@@ -2,6 +2,8 @@ import '../core/api/api_client.dart';
 import '../models/mock_data.dart';
 import '../models/senior_details_model.dart';
 import '../models/senior_vital_history_model.dart';
+import '../models/latest_vitals_model.dart';
+import '../models/vital_alert_model.dart';
 import '../utils/app_logger.dart';
 
 class SeniorsResponse {
@@ -175,6 +177,49 @@ class SeniorRepository {
     } else {
       final errMsg = res.errorMessage;
       AppLogger.e('[$_tag] Fetch senior vitals history failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Fetch the latest recorded vitals for a senior.
+  ///
+  /// Calls GET /v1/vitals/latest/{seniorId}.
+  /// Returns a strongly typed [LatestVitalsModel] or null if vitals are unavailable.
+  Future<LatestVitalsModel?> getLatestVitals(String seniorId) async {
+    AppLogger.i('[$_tag] Fetch latest vitals started for ID: $seniorId');
+    final res = await _apiClient.get('vitals/latest/$seniorId');
+
+    if (res.success) {
+      if (res.data == null) {
+        AppLogger.i('[$_tag] Latest vitals is null / unavailable for ID: $seniorId');
+        return null;
+      }
+      final vitals = LatestVitalsModel.fromJson(res.data as Map<String, dynamic>);
+      AppLogger.i('[$_tag] Latest vitals loaded successfully for ID: $seniorId. BP: ${vitals.bpSystolic}/${vitals.bpDiastolic}');
+      return vitals;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Fetch latest vitals failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Fetch all active and past vital alerts.
+  ///
+  /// Calls GET /v1/vitals/alerts.
+  /// Returns a list of [VitalAlertModel].
+  Future<List<VitalAlertModel>> getVitalAlerts() async {
+    AppLogger.i('[$_tag] Fetch vital alerts started');
+    final res = await _apiClient.get('vitals/alerts');
+
+    if (res.success) {
+      final List<dynamic> dataList = res.data as List<dynamic>? ?? [];
+      final list = dataList.map((e) => VitalAlertModel.fromJson(e as Map<String, dynamic>)).toList();
+      AppLogger.i('[$_tag] Vital alerts loaded successfully. Count: ${list.length}');
+      return list;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Fetch vital alerts failed: $errMsg');
       throw Exception(errMsg);
     }
   }
