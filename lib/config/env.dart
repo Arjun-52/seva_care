@@ -2,8 +2,8 @@
 /// Switch between dev and production by changing the active profile
 class Env {
   //  Development (active) 
-static const String apiBaseUrl = 'http://192.168.10.64:4000/v1';
-static const String wsUrl = 'ws://192.168.10.64:4000';
+  static const String apiBaseUrl = 'https://seva-backend-api-5qk4.onrender.com/v1';
+  static const String wsUrl = 'wss://seva-backend-api-5qk4.onrender.com';
   static const String razorpayKey = 'rzp_test_SgTgIrRTm5fJjb';
   static const String mapApiKey = 'YOUR_GOOGLE_MAPS_KEY';
 

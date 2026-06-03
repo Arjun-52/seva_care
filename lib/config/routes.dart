@@ -36,7 +36,7 @@ class AppRoutes {
     initialLocation: '/',
     debugLogDiagnostics: true,
     routes: [
-      // ─── Core / Splash ─────────────────────────
+      // Core / Splash
       GoRoute(
         path: '/',
         builder: (context, state) => const SplashScreen(),
@@ -54,13 +54,13 @@ class AppRoutes {
         builder: (context, state) => const RegisterScreen(),
       ),
       
-      // ─── Admin Module ──────────────────────────
+      // Admin Module
       GoRoute(
         path: '/admin',
         builder: (context, state) => const AdminHome(),
       ),
 
-      // ─── Senior Module ─────────────────────────
+      //Senior Module
       GoRoute(
         path: '/senior',
         builder: (context, state) => const SeniorHome(),
@@ -76,7 +76,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Family Module ─────────────────────────
+      //Family Module
       GoRoute(
         path: '/family',
         builder: (context, state) => const FamilyHome(),
@@ -91,7 +91,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Aide Module ───────────────────────────
+      //Aide Module
       GoRoute(
         path: '/aide',
         builder: (context, state) => const AideHome(),
@@ -107,7 +107,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Settings Module ───────────────────────
+      //Settings Module
       GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsScreen(),
@@ -119,7 +119,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Razorpay Test Route ───────────────────
+      //Razorpay Test Route
       GoRoute(
         path: '/razorpay-test',
         builder: (context, state) => const RazorpayTestScreen(),

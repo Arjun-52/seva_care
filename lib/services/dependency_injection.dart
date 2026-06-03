@@ -7,6 +7,7 @@ import '../repositories/settings_repository.dart';
 import '../repositories/notification_repository.dart';
 import '../repositories/senior_repository.dart';
 import '../repositories/care_logs_repository.dart';
+import '../repositories/medicines_repository.dart';
 import 'websocket_service.dart';
 
 final locator = GetIt.instance;
@@ -40,6 +41,10 @@ Future<void> setupLocator() async {
   // ─── Care Logs Repository ──────────────
   final careLogsRepo = CareLogsRepository(apiClient);
   locator.registerSingleton<CareLogsRepository>(careLogsRepo);
+
+  // ─── Medicines Repository ──────────────
+  final medicinesRepo = MedicinesRepository(apiClient);
+  locator.registerSingleton<MedicinesRepository>(medicinesRepo);
 
   // ─── Web Socket Service ────────────────────
   final webSocketService = WebSocketService();

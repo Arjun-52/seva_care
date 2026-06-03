@@ -39,6 +39,79 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
       _error = null;
     });
 
+    if (widget.senior.id.startsWith('SR')) {
+      if (mounted) {
+        setState(() {
+          _details = SeniorDetailsModel(
+            id: widget.senior.id,
+            name: widget.senior.name,
+            age: widget.senior.age,
+            gender: widget.senior.gender,
+            city: widget.senior.city,
+            tier: widget.senior.tier,
+            status: widget.senior.status,
+            mobility: widget.senior.mobility,
+            conditions: widget.senior.conditions,
+            avatar: widget.senior.avatar,
+            phone: widget.senior.phone,
+            createdAt: widget.senior.lastCheckIn,
+            updatedAt: widget.senior.lastCheckIn,
+            familyLinks: [
+              FamilyLinkModel(
+                relation: 'Son',
+                isPrimary: true,
+                user: FamilyUserModel(id: 'usr1', name: 'Rajesh Sharma', email: 'rajesh@example.com', phone: '+1 555-0199'),
+              ),
+            ],
+            vitals: MockData.vitalsHistory.map((h) => VitalModel(
+              bpSystolic: (h['bp_sys'] as num?)?.toInt(),
+              bpDiastolic: (h['bp_dia'] as num?)?.toInt(),
+              spo2: (h['spo2'] as num?)?.toInt(),
+              heartRate: (h['hr'] as num?)?.toInt(),
+              temperature: 98.2,
+              recordedAt: DateTime.now().subtract(const Duration(hours: 2)),
+            )).toList(),
+            medicines: MockData.medicines.where((m) => m.seniorId == widget.senior.id).map((m) => MedicineDetailsModel(
+              id: m.id,
+              name: m.name,
+              dosage: m.dosage,
+              frequency: m.frequency,
+              time: m.time,
+              taken: m.taken,
+              notes: m.notes,
+            )).toList(),
+            iotDevices: [
+              IotDeviceDetailsModel(id: 'iot1', name: 'Smart Watch', type: 'wearable', status: 'online', battery: 85, lastReading: '88 bpm'),
+              IotDeviceDetailsModel(id: 'iot2', name: 'Blood Pressure Monitor', type: 'medical', status: 'online', battery: 92, lastReading: '120/80 mmHg'),
+            ],
+            emergencyAlerts: [],
+          );
+          _latestVitals = LatestVitalsModel(
+            id: 'mock_latest',
+            seniorId: widget.senior.id,
+            bpSystolic: 130,
+            bpDiastolic: 82,
+            spo2: 96,
+            heartRate: 72,
+            temperature: 98.2,
+            recordedAt: DateTime.now(),
+            createdAt: DateTime.now(),
+          );
+          _vitalsHistory = MockData.vitalsHistory.map((h) => SeniorVitalHistoryModel(
+            id: 'h_${h['time']}',
+            bpSystolic: (h['bp_sys'] as num?)?.toInt(),
+            bpDiastolic: (h['bp_dia'] as num?)?.toInt(),
+            spo2: (h['spo2'] as num?)?.toInt(),
+            heartRate: (h['hr'] as num?)?.toInt(),
+            temperature: 98.2,
+            recordedAt: DateTime.now().subtract(const Duration(hours: 2)),
+          )).toList();
+          _loading = false;
+        });
+      }
+      return;
+    }
+
     try {
       final results = await Future.wait([
         locator<SeniorRepository>().getSeniorById(widget.senior.id),

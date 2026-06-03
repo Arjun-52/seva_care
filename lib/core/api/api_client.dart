@@ -355,6 +355,7 @@ class ApiClient {
   void _logRequest(String method, Uri uri, Map<String, String> headers, String? body) {
     // A clean console output, ready for expansion/integration with analytics/monitoring
     print('[API REQUEST] $method -> $uri');
+    AppLogger.i('[ApiClient] Final Request URL: $uri');
     print('[API HEADERS] $headers');
     if (body != null) {
       print('[API BODY] $body');

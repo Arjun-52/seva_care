@@ -16,25 +16,46 @@ class Senior {
   });
 
   factory Senior.fromJson(Map<String, dynamic> json) {
+    String zoneVal = '';
+    if (json['zone'] is Map) {
+      zoneVal = json['zone']['name'] as String? ?? '';
+    } else if (json['zone'] is String) {
+      zoneVal = json['zone'] as String;
+    }
+
+    String careAideVal = '';
+    if (json['careAide'] is Map) {
+      careAideVal = json['careAide']['name'] as String? ?? '';
+    } else if (json['careAide'] is String) {
+      careAideVal = json['careAide'] as String;
+    }
+
+    String? nriContactVal;
+    if (json['nriContact'] is Map) {
+      nriContactVal = json['nriContact']['name'] as String? ?? '';
+    } else if (json['nriContact'] is String) {
+      nriContactVal = json['nriContact'] as String;
+    }
+
     return Senior(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       age: json['age'] as int? ?? 0,
       gender: json['gender'] as String? ?? '',
-      zone: json['zone'] as String? ?? '',
+      zone: zoneVal,
       city: json['city'] as String? ?? '',
       tier: json['tier'] as String? ?? '',
       status: json['status'] as String? ?? '',
       conditions: (json['conditions'] as List?)?.map((e) => e.toString()).toList() ?? [],
       mobility: json['mobility'] as String? ?? '',
-      careAide: json['careAide'] as String? ?? '',
+      careAide: careAideVal,
       avatar: json['avatar'] as String? ?? '',
       phone: json['phone'] as String? ?? '',
       vitals: json['vitals'] as Map<String, dynamic>? ?? {},
       lastCheckIn: json['lastCheckIn'] != null
-          ? DateTime.tryParse(json['lastCheckIn'] as String) ?? DateTime.now()
+          ? DateTime.tryParse(json['lastCheckIn'].toString()) ?? DateTime.now()
           : DateTime.now(),
-      nriContact: json['nriContact'] as String?,
+      nriContact: nriContactVal,
     );
   }
 

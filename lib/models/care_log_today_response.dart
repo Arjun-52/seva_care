@@ -39,12 +39,18 @@ class TodayCareLogData {
     final List<dynamic> logsJson = json['logs'] as List<dynamic>? ?? [];
     final logsList = logsJson.map((e) {
       final item = e as Map<String, dynamic>;
+      String whoVal = '';
+      if (item['who'] is Map) {
+        whoVal = item['who']['name'] as String? ?? '';
+      } else if (item['who'] is String) {
+        whoVal = item['who'] as String;
+      }
       return CareLog(
         id: item['id'] is int ? item['id'] as int : int.parse(item['id'].toString()),
         seniorId: item['seniorId'] as String? ?? '',
         time: item['time'] as String? ?? '',
         activity: item['activity'] as String? ?? '',
-        who: item['who'] as String? ?? '',
+        who: whoVal,
         status: item['status'] as String? ?? '',
         type: item['type'] as String? ?? '',
         notes: item['notes'] as String? ?? '',

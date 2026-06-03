@@ -21,12 +21,18 @@ class CareLogsResponse {
     final List<dynamic> dataList = data as List<dynamic>? ?? [];
     final logsList = dataList.map((e) {
       final json = e as Map<String, dynamic>;
+      String whoVal = '';
+      if (json['who'] is Map) {
+        whoVal = json['who']['name'] as String? ?? '';
+      } else if (json['who'] is String) {
+        whoVal = json['who'] as String;
+      }
       return CareLog(
         id: json['id'] is int ? json['id'] as int : int.parse(json['id'].toString()),
         seniorId: json['seniorId'] as String? ?? '',
         time: json['time'] as String? ?? '',
         activity: json['activity'] as String? ?? '',
-        who: json['who'] as String? ?? '',
+        who: whoVal,
         status: json['status'] as String? ?? '',
         type: json['type'] as String? ?? '',
         notes: json['notes'] as String? ?? '',
