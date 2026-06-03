@@ -4,6 +4,7 @@ import '../../utils/theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/seva_widgets.dart';
 import '../../models/mock_data.dart';
+import '../../repositories/notification_repository.dart';
 import '../shared/senior_detail_screen.dart';
 import 'family_notifications.dart';
 import 'family_seniors.dart';
@@ -39,19 +40,25 @@ class FamilyDashboard extends StatelessWidget {
               ])),
               GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilyNotifications())),
-                child: Stack(children: [
-                  Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: SevaColors.border)),
-                    child: const Icon(Icons.notifications_outlined, color: SevaColors.textSecondary),
-                  ),
-                  Positioned(right: 0, top: 0, child: Container(
-                    width: 18, height: 18,
-                    decoration: const BoxDecoration(color: SevaColors.red, shape: BoxShape.circle),
-                    child: Center(child: Text('3', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white))),
-                  )),
-                ]),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: NotificationRepository.unreadCountNotifier,
+                  builder: (context, count, child) {
+                    return Stack(children: [
+                      Container(
+                        width: 44, height: 44,
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: SevaColors.border)),
+                        child: const Icon(Icons.notifications_outlined, color: SevaColors.textSecondary),
+                      ),
+                      if (count > 0)
+                        Positioned(right: 0, top: 0, child: Container(
+                          width: 18, height: 18,
+                          decoration: const BoxDecoration(color: SevaColors.red, shape: BoxShape.circle),
+                          child: Center(child: Text('$count', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white))),
+                        )),
+                    ]);
+                  }
+                ),
               ),
             ]),
             const SizedBox(height: 20),
