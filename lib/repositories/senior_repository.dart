@@ -6,6 +6,10 @@ import '../models/latest_vitals_model.dart';
 import '../models/vital_alert_model.dart';
 import '../models/sos_response.dart';
 import '../models/emergency_alerts_response.dart' as ear;
+import '../models/video_schedule_response.dart';
+import '../models/instant_video_call_response.dart';
+import '../models/video_calls_response.dart';
+import '../models/end_video_call_response.dart';
 import '../utils/app_logger.dart';
 
 class SeniorsResponse {
@@ -290,6 +294,135 @@ class SeniorRepository {
     } else {
       final errMsg = res.errorMessage;
       AppLogger.e('[$_tag] Fetch emergency alerts failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Schedule a video call for a senior citizen.
+  ///
+  /// Calls POST /v1/video/schedule.
+  Future<VideoScheduleResponse> scheduleVideoCall({
+    required String seniorId,
+    required DateTime scheduledAt,
+  }) async {
+    AppLogger.i('[$_tag] Schedule video call request started. seniorId: $seniorId, scheduledAt: $scheduledAt');
+    
+    final payload = {
+      'seniorId': seniorId,
+      'scheduledAt': scheduledAt.toUtc().toIso8601String(),
+    };
+
+    final res = await _apiClient.post('video/schedule', body: payload);
+
+    if (res.success) {
+      if (res.data == null) {
+        throw Exception('Received null data from server');
+      }
+      final response = VideoScheduleResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Video call scheduled successfully',
+        'data': res.data,
+        'errors': const [],
+        'meta': {},
+      });
+      final call = response.data;
+      if (call != null) {
+        AppLogger.i('[$_tag] Video call scheduled successfully. ID: ${call.id}, URL: ${call.meetUrl}');
+      }
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Schedule video call failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Start an instant video call for a senior citizen.
+  ///
+  /// Calls POST /v1/video/instant.
+  Future<InstantVideoCallResponse> startInstantVideoCall({
+    required String seniorId,
+  }) async {
+    AppLogger.i('[$_tag] Instant video call request started. seniorId: $seniorId');
+    
+    final payload = {
+      'seniorId': seniorId,
+    };
+
+    final res = await _apiClient.post('video/instant', body: payload);
+
+    if (res.success) {
+      if (res.data == null) {
+        throw Exception('Received null data from server');
+      }
+      final response = InstantVideoCallResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Instant video call started successfully',
+        'data': res.data,
+        'errors': const [],
+        'meta': {},
+      });
+      final call = response.data;
+      if (call != null) {
+        AppLogger.i('[$_tag] Instant video call started successfully. ID: ${call.id}, URL: ${call.meetUrl}');
+      }
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Instant video call failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Fetch all video call records.
+  ///
+  /// Calls GET /v1/video.
+  Future<VideoCallsResponse> getVideoCalls() async {
+    AppLogger.i('[$_tag] Get video calls request started');
+    final res = await _apiClient.get('video');
+
+    if (res.success) {
+      final response = VideoCallsResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Success',
+        'data': res.data,
+        'errors': const [],
+        'meta': {},
+      });
+      AppLogger.i('[$_tag] Video calls loaded. Count: ${response.videoCalls.length}');
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Get video calls failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// End an active video call by ID.
+  ///
+  /// Calls PATCH /v1/video/{id}/end.
+  Future<EndVideoCallResponse> endVideoCall({
+    required String callId,
+  }) async {
+    AppLogger.i('[$_tag] End video call request started. Call ID: $callId');
+    final res = await _apiClient.patch('video/$callId/end', body: {});
+
+    if (res.success) {
+      final response = EndVideoCallResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Call ended',
+        'data': res.data,
+        'errors': const [],
+        'meta': {},
+      });
+      final call = response.data;
+      if (call != null) {
+        AppLogger.i('[$_tag] Call ended successfully. ID: ${call.id}, Status: ${call.status}, endedAt: ${call.endedAt}');
+      }
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] End video call failed: $errMsg');
       throw Exception(errMsg);
     }
   }

@@ -69,11 +69,21 @@ class _FamilyEmergencyState extends State<FamilyEmergency> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingSenior) {
+      return Scaffold(
+        backgroundColor: SevaColors.background,
+        appBar: AppBar(title: Text(t('emergency'))),
+        body: const Center(
+          child: CircularProgressIndicator(color: SevaColors.primary),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: SevaColors.background,
       appBar: AppBar(title: Text(t('emergency'))),
       body: Obx(() {
-        if (_loadingSenior || (_controller.state.value == EmergencyState.loading && _controller.emergencyAlerts.isEmpty)) {
+        if (_controller.state.value == EmergencyState.loading && _controller.emergencyAlerts.isEmpty) {
           return const Center(
             child: CircularProgressIndicator(color: SevaColors.primary),
           );

@@ -153,6 +153,15 @@ class ApiClient {
     return _executeWithRetry('PUT', endpoint, body: body);
   }
 
+  // ─── PATCH ─────────────────────────────────
+
+  Future<ApiResult<dynamic>> patch(
+    String endpoint, {
+    Map<String, dynamic>? body,
+  }) async {
+    return _executeWithRetry('PATCH', endpoint, body: body);
+  }
+
   // ─── DELETE ────────────────────────────────
 
   Future<ApiResult<dynamic>> delete(String endpoint) async {
@@ -203,6 +212,12 @@ class ApiClient {
         response = await _client.put(uri, headers: headers, body: encodedBody).timeout(
               Duration(milliseconds: Env.receiveTimeout),
             );
+      } else if (method == 'PATCH') {
+        final encodedBody = body != null ? jsonEncode(body) : null;
+        _logRequest('PATCH', uri, headers, encodedBody);
+        response = await _client.patch(uri, headers: headers, body: encodedBody).timeout(
+              Duration(milliseconds: Env.receiveTimeout),
+            );
       } else if (method == 'DELETE') {
         _logRequest('DELETE', uri, headers, null);
         response = await _client.delete(uri, headers: headers).timeout(
@@ -251,6 +266,10 @@ class ApiClient {
                   );
             } else if (method == 'PUT') {
               retryResponse = await _client.put(uri, headers: retryHeaders, body: body != null ? jsonEncode(body) : null).timeout(
+                    Duration(milliseconds: Env.receiveTimeout),
+                  );
+            } else if (method == 'PATCH') {
+              retryResponse = await _client.patch(uri, headers: retryHeaders, body: body != null ? jsonEncode(body) : null).timeout(
                     Duration(milliseconds: Env.receiveTimeout),
                   );
             } else if (method == 'DELETE') {

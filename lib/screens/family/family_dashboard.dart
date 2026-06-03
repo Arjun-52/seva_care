@@ -20,6 +20,8 @@ import '../../models/care_log_today_response.dart';
 import '../../models/medicine.dart' hide Medicine;
 import '../../utils/app_logger.dart';
 import '../../controllers/emergency_controller.dart';
+import 'schedule_video_call_dialog.dart';
+import 'family_video_calls.dart';
 
 class FamilyDashboard extends StatefulWidget {
   const FamilyDashboard({super.key});
@@ -364,9 +366,10 @@ class _FamilyDashboardState extends State<FamilyDashboard> {
                   onTap: () => _showSOSConfirm(context)),
                 QuickActionButton(icon: Icons.videocam, label: t('video_call'), color: SevaColors.primary, bgColor: SevaColors.primaryLight,
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('Starting video call with ${senior.name}...'), behavior: SnackBarBehavior.floating, backgroundColor: SevaColors.primary,
-                    ));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const FamilyVideoCallsScreen()),
+                    );
                   }),
                 QuickActionButton(icon: Icons.medication, label: t('medicines'), color: SevaColors.purple, bgColor: SevaColors.purpleLight,
                   onTap: () {

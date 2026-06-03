@@ -10,6 +10,8 @@ import '../../services/dependency_injection.dart';
 import '../../repositories/senior_repository.dart';
 import '../../utils/app_logger.dart';
 import '../family/edit_senior_screen.dart';
+import '../family/schedule_video_call_dialog.dart';
+import '../family/family_video_calls.dart';
 
 class SeniorDetailScreen extends StatefulWidget {
   final Senior senior;
@@ -719,7 +721,7 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
                   ),
                 )
               else
-                ..._vitalsHistory!.map((h) => Padding(
+                ..._vitalsHistory!.take(5).map((h) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: SevaCard(
                     padding: const EdgeInsets.all(16),
@@ -805,10 +807,10 @@ class _SeniorDetailScreenState extends State<SeniorDetailScreen> {
                 const SizedBox(width: 12),
                 Expanded(child: ElevatedButton.icon(
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Starting video call...'),
-                      behavior: SnackBarBehavior.floating, backgroundColor: SevaColors.primary,
-                    ));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const FamilyVideoCallsScreen()),
+                    );
                   },
                   icon: const Icon(Icons.videocam, size: 18),
                   label: const Text('Video Call'),
