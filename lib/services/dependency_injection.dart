@@ -6,6 +6,7 @@ import '../repositories/subscription_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/notification_repository.dart';
 import '../repositories/senior_repository.dart';
+import '../repositories/care_logs_repository.dart';
 import 'websocket_service.dart';
 
 final locator = GetIt.instance;
@@ -35,6 +36,10 @@ Future<void> setupLocator() async {
   // ─── Senior Repository ─────────────────
   final seniorRepo = SeniorRepository(apiClient);
   locator.registerSingleton<SeniorRepository>(seniorRepo);
+
+  // ─── Care Logs Repository ──────────────
+  final careLogsRepo = CareLogsRepository(apiClient);
+  locator.registerSingleton<CareLogsRepository>(careLogsRepo);
 
   // ─── Web Socket Service ────────────────────
   final webSocketService = WebSocketService();
