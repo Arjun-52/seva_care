@@ -99,14 +99,14 @@ class _EditSeniorScreenState extends State<EditSeniorScreen> {
       'name': name,
       'age': age,
       'gender': _gender,
-      'phone': phone.isNotEmpty ? phone : null,
-      'city': city.isNotEmpty ? city : '',
+      'phone': phone,
+      'city': city,
       'tier': _tier,
       'status': _status,
       'mobility': _mobility,
       'conditions': conditions,
-      'address': address.isNotEmpty ? address : null,
-      'emergencyNotes': emergencyNotes.isNotEmpty ? emergencyNotes : null,
+      'address': address,
+      'emergencyNotes': emergencyNotes,
     };
 
     AppLogger.i('Submitting edit senior payload: $payload');

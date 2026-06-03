@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:get/get.dart';
 import '../../utils/theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/seva_widgets.dart';
@@ -18,6 +19,7 @@ import '../../models/latest_vitals_model.dart';
 import '../../models/care_log_today_response.dart';
 import '../../models/medicine.dart' hide Medicine;
 import '../../utils/app_logger.dart';
+import '../../controllers/emergency_controller.dart';
 
 class FamilyDashboard extends StatefulWidget {
   const FamilyDashboard({super.key});
@@ -464,6 +466,16 @@ class _FamilyDashboardState extends State<FamilyDashboard> {
   }
 
   void _showSOSConfirm(BuildContext context) {
+    if (_senior == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('No senior citizen selected'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: SevaColors.red,
+      ));
+      return;
+    }
+
+    final emergencyController = Get.put(EmergencyController());
     showDialog(context: context, builder: (ctx) => AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Row(children: [
@@ -475,23 +487,93 @@ class _FamilyDashboardState extends State<FamilyDashboard> {
         style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('cancel'))),
-        ElevatedButton(
-          onPressed: () {
+        Obx(() => ElevatedButton(
+          onPressed: emergencyController.submitting.value ? null : () async {
             Navigator.pop(ctx);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Row(children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Text(t('sos_triggered')),
-              ]),
-              behavior: SnackBarBehavior.floating, backgroundColor: SevaColors.red,
-              duration: const Duration(seconds: 4),
-            ));
+            
+            // Show loading dialog
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (loadingCtx) => const Center(
+                child: CircularProgressIndicator(color: SevaColors.primary),
+              ),
+            );
+
+            final success = await emergencyController.triggerSOS(seniorId: _senior!.id);
+            
+            // Dismiss loading dialog safely
+            if (context.mounted) {
+              Navigator.pop(context);
+            }
+
+            if (success) {
+              if (context.mounted) {
+                showDialog(
+                  context: context,
+                  builder: (successCtx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    title: Row(children: [
+                      const Icon(Icons.check_circle, color: SevaColors.green, size: 28),
+                      const SizedBox(width: 10),
+                      Text('Emergency Alert Sent', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+                    ]),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Alert ID: ${emergencyController.alertId.value}', style: GoogleFonts.inter(fontSize: 14)),
+                        const SizedBox(height: 8),
+                        Text('Status: ${emergencyController.alertStatus.value}', style: GoogleFonts.inter(fontSize: 14)),
+                        const SizedBox(height: 8),
+                        Text('Emergency Number: ${emergencyController.emergencyNumber.value}', style: GoogleFonts.inter(fontSize: 14)),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(successCtx),
+                        child: Text(t('ok')),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            } else {
+              if (context.mounted) {
+                showDialog(
+                  context: context,
+                  builder: (errorCtx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    title: Row(children: [
+                      const Icon(Icons.error_outline, color: SevaColors.red, size: 28),
+                      const SizedBox(width: 10),
+                      Text('Error', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+                    ]),
+                    content: Text(emergencyController.errorMessage.value.isNotEmpty 
+                      ? emergencyController.errorMessage.value 
+                      : 'Something went wrong'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(errorCtx),
+                        child: Text(t('ok')),
+                      ),
+                    ],
+                  ),
+                );
+              }
+            }
           },
           style: ElevatedButton.styleFrom(backgroundColor: SevaColors.red),
-          child: Text(t('trigger_sos')),
-        ),
+          child: emergencyController.submitting.value
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                )
+              : Text(t('trigger_sos')),
+        )),
       ],
     ));
   }
 }
+

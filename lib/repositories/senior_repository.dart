@@ -4,6 +4,8 @@ import '../models/senior_details_model.dart';
 import '../models/senior_vital_history_model.dart';
 import '../models/latest_vitals_model.dart';
 import '../models/vital_alert_model.dart';
+import '../models/sos_response.dart';
+import '../models/emergency_alerts_response.dart' as ear;
 import '../utils/app_logger.dart';
 
 class SeniorsResponse {
@@ -220,6 +222,74 @@ class SeniorRepository {
     } else {
       final errMsg = res.errorMessage;
       AppLogger.e('[$_tag] Fetch vital alerts failed: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Trigger emergency SOS alert for selected senior citizen.
+  ///
+  /// Calls POST /v1/emergency/sos.
+  Future<SosResponse> triggerSOS({required String seniorId}) async {
+    AppLogger.i('[$_tag] SOS triggered. seniorId used: $seniorId. Request started');
+    
+    final payload = {
+      'seniorId': seniorId,
+      'triggeredBy': 'family',
+    };
+
+    final res = await _apiClient.post('emergency/sos', body: payload);
+
+    if (res.success) {
+      if (res.data == null) {
+        AppLogger.e('[$_tag] triggerSOS request returned success but null data');
+        throw Exception('Received null data from server');
+      }
+      final response = SosResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Created',
+        'data': res.data,
+      });
+
+      final alert = response.data;
+      if (alert != null) {
+        AppLogger.i('[$_tag] Request success. Alert ID received: ${alert.alertId}, Alert status received: ${alert.status}, Emergency number received: ${alert.emergencyNumber}');
+      }
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] API failure: $errMsg');
+      throw Exception(errMsg);
+    }
+  }
+
+  /// Fetch emergency alerts records with pagination.
+  ///
+  /// Calls GET /v1/emergency/alerts.
+  Future<ear.EmergencyAlertsResponse> getEmergencyAlerts({
+    int page = 1,
+    int limit = 20,
+  }) async {
+    AppLogger.i('[$_tag] Fetch emergency alerts started for page: $page');
+    final res = await _apiClient.get('emergency/alerts', queryParams: {
+      'page': page.toString(),
+      'limit': limit.toString(),
+    });
+
+    if (res.success) {
+      final response = ear.EmergencyAlertsResponse.fromJson({
+        'success': true,
+        'message': res.message ?? 'Success',
+        'data': res.data,
+        'errors': const [],
+        'meta': {
+          'pagination': res.pagination,
+        },
+      });
+      AppLogger.i('[$_tag] Emergency alerts loaded. Count: ${response.alerts.length}');
+      return response;
+    } else {
+      final errMsg = res.errorMessage;
+      AppLogger.e('[$_tag] Fetch emergency alerts failed: $errMsg');
       throw Exception(errMsg);
     }
   }
