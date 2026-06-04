@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../config/env.dart';
+import '../core/storage/local_storage_service.dart';
+import 'dependency_injection.dart';
+import '../utils/app_logger.dart';
 
 /// Central API service for all backend communication.
 ///
@@ -161,25 +164,47 @@ class ApiService {
   }
 
   static Future<void> logout() async {
-    await post('auth/logout', body: {'refreshToken': _refreshToken});
+    try {
+      await post('auth/logout');
+    } catch (_) {}
     clearTokens();
   }
 
   static Future<bool> refreshAccessToken() async {
     if (_refreshToken == null) return false;
+    AppLogger.i('Refresh token request started (via ApiService)');
     try {
       final uri = _buildUri('auth/refresh');
       final response = await http.post(uri,
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'refreshToken': _refreshToken}));
+          body: jsonEncode({'refreshToken': _refreshToken})).timeout(
+            Duration(milliseconds: Env.receiveTimeout),
+          );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body)['data'];
-        setTokens(
-            access: data['token'], refresh: data['refreshToken']);
+        final access = data['token'] as String;
+        final refresh = data['refreshToken'] as String;
+        
+        // Update in secure local storage
+        final storage = locator<LocalStorageService>();
+        await storage.saveAuthToken(access);
+        await storage.saveRefreshToken(refresh);
+
+        // Update in ApiService
+        setTokens(access: access, refresh: refresh);
+        
+        AppLogger.i('Refresh successful, tokens updated (via ApiService)');
         return true;
       }
-    } catch (_) {}
+      AppLogger.e('Refresh token failed with status code: ${response.statusCode} (via ApiService)');
+    } catch (e, stack) {
+      AppLogger.e('Refresh token failed due to network/unknown error (via ApiService)', e, stack);
+      final errStr = e.toString();
+      if (errStr.contains('SocketException') || errStr.contains('HandshakeException') || errStr.contains('TimeoutException')) {
+        rethrow; // Rethrow network error so we don't log out!
+      }
+    }
     clearTokens();
     return false;
   }

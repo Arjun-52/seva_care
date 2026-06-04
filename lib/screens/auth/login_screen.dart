@@ -3,6 +3,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../../config/theme.dart';
 import '../../l10n/app_localizations.dart';
+import '../../core/api/api_client.dart';
+import '../../core/storage/local_storage_service.dart';
+import '../../models/user_model.dart';
+import '../../services/dependency_injection.dart';
+import '../../services/api_service.dart';
+import '../../utils/app_logger.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,6 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   int _selectedRole = 0;
   bool _obscure = true;
   bool _loading = false;
+  bool _rememberMe = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -39,22 +46,154 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signIn() async {
-    setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() => _loading = false);
+    final emailVal = _emailController.text.trim();
+    final passwordVal = _passwordController.text;
+    final roleStr = _selectedRole == 0 ? 'family' : _selectedRole == 1 ? 'care_aide' : 'senior';
 
-    String destRoute;
-    if (_selectedRole == 0) {
-      destRoute = '/family';
-    } else if (_selectedRole == 1) {
-      destRoute = '/aide';
-    } else {
-      destRoute = '/senior';
+    // ─── Validation ───────────────────────────
+    if (emailVal.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Email is required.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
     }
 
-    if (!mounted) return;
-    context.go(destRoute);
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (!emailRegex.hasMatch(emailVal)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please enter a valid email address.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    if (passwordVal.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Password is required.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    if (passwordVal.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Password must be at least 6 characters long.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+
+    setState(() => _loading = true);
+    AppLogger.i('Login request started for email: $emailVal, role: $roleStr');
+
+    try {
+      final result = await locator<ApiClient>().post('auth/login', body: {
+        'email': emailVal,
+        'password': passwordVal,
+        'role': roleStr,
+      });
+
+      if (!mounted) return;
+
+      if (result.success && result.data != null) {
+        AppLogger.i('Login success');
+        
+        final loginResponse = LoginResponse.fromJson(result.data as Map<String, dynamic>);
+        final userRole = loginResponse.user.role.isNotEmpty ? loginResponse.user.role : roleStr;
+        AppLogger.i('User role detected: $userRole');
+
+        // Store tokens & details in LocalStorageService
+        final storage = locator<LocalStorageService>();
+        await storage.saveAuthToken(loginResponse.token);
+        await storage.saveRefreshToken(loginResponse.refreshToken);
+        await storage.saveUserId(loginResponse.user.id);
+        await storage.saveUserName(loginResponse.user.name);
+        await storage.saveUserEmail(loginResponse.user.email);
+        await storage.saveUserRole(userRole);
+        await storage.saveUserPhone(loginResponse.user.phone);
+        await storage.saveUserAvatar(loginResponse.user.avatar);
+        await storage.saveRememberMe(_rememberMe);
+        await storage.saveIsLoggedIn(true);
+
+        // Also set on ApiService
+        ApiService.setTokens(access: loginResponse.token, refresh: loginResponse.refreshToken);
+        AppLogger.i('Token stored successfully');
+
+        // Fetch fresh profile details in the background so it doesn't block navigation
+        AppLogger.i('Fetch profile started (background)');
+        locator<ApiClient>().get('auth/me').then((profileResult) async {
+          if (profileResult.success && profileResult.data != null) {
+            final profileUser = UserModel.fromJson(profileResult.data as Map<String, dynamic>);
+            await storage.saveUserId(profileUser.id);
+            await storage.saveUserName(profileUser.name);
+            await storage.saveUserEmail(profileUser.email);
+            await storage.saveUserRole(profileUser.role.isNotEmpty ? profileUser.role : userRole);
+            await storage.saveUserPhone(profileUser.phone);
+            await storage.saveUserAvatar(profileUser.avatar);
+            await storage.saveUserCountry(profileUser.country);
+            await storage.saveUserTimezone(profileUser.timezone);
+            await storage.saveUserLanguage(profileUser.language);
+            await storage.saveUserStatus(profileUser.status);
+            AppLogger.i('Profile fetched successfully in background');
+            AppLogger.i('Profile cache updated');
+          } else {
+            AppLogger.e('Profile fetch failed in background: ${profileResult.errorMessage}');
+          }
+        }).catchError((profileErr, profileStack) {
+          AppLogger.e('Profile fetch failed in background', profileErr, profileStack);
+        });
+
+        String destRoute;
+        if (userRole == 'family') {
+          destRoute = '/family';
+        } else if (userRole == 'care_aide') {
+          destRoute = '/aide';
+        } else if (userRole == 'senior') {
+          destRoute = '/senior';
+        } else if (userRole == 'admin') {
+          destRoute = '/admin';
+        } else {
+          destRoute = _selectedRole == 0 ? '/family' : _selectedRole == 1 ? '/aide' : '/senior';
+        }
+
+        AppLogger.i('Navigation target: $destRoute');
+        if (mounted) {
+          context.go(destRoute);
+        }
+      } else {
+        final errorMsg = result.errorMessage;
+        AppLogger.e('Login failed: $errorMsg');
+
+        // Build a detailed error message
+        String detailedError = errorMsg;
+        if (result.failure != null) {
+          detailedError += ' (${result.failure})';
+        }
+        // Show snackbar with red background
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(detailedError),
+              backgroundColor: SevaColors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e, stack) {
+      AppLogger.e('Unknown error during login', e, stack);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   void _showLanguagePicker() {
@@ -209,19 +348,45 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 14),
 
-            // Forgot Password
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Password reset link sent to your email.'),
-                    behavior: SnackBarBehavior.floating,
-                  ));
-                },
-                child: Text(t('forgot_password'),
-                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: SevaColors.primary)),
-              ),
+            // Remember Me & Forgot Password
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Checkbox(
+                        value: _rememberMe,
+                        activeColor: SevaColors.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        onChanged: (val) {
+                          setState(() {
+                            _rememberMe = val ?? false;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Remember Me',
+                      style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: SevaColors.textSecondary),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Password reset link sent to your email.'),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  },
+                  child: Text(t('forgot_password'),
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: SevaColors.primary)),
+                ),
+              ],
             ),
             const SizedBox(height: 20),
 
@@ -250,12 +415,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
             if (_selectedRole == 0)
               Center(child: GestureDetector(
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(t('start_free_trial')),
-                    behavior: SnackBarBehavior.floating, backgroundColor: SevaColors.primary,
-                  ));
-                },
+                onTap: () => context.go('/register'),
                 child: Text.rich(TextSpan(children: [
                   TextSpan(text: '${t('no_account')} ', style: GoogleFonts.inter(fontSize: 14, color: SevaColors.textSecondary)),
                   TextSpan(text: t('start_free_trial'), style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: SevaColors.primary)),

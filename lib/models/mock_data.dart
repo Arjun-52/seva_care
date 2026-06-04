@@ -14,6 +14,71 @@ class Senior {
     required this.avatar, required this.phone, required this.vitals,
     required this.lastCheckIn, this.nriContact,
   });
+
+  factory Senior.fromJson(Map<String, dynamic> json) {
+    String zoneVal = '';
+    if (json['zone'] is Map) {
+      zoneVal = json['zone']['name'] as String? ?? '';
+    } else if (json['zone'] is String) {
+      zoneVal = json['zone'] as String;
+    }
+
+    String careAideVal = '';
+    if (json['careAide'] is Map) {
+      careAideVal = json['careAide']['name'] as String? ?? '';
+    } else if (json['careAide'] is String) {
+      careAideVal = json['careAide'] as String;
+    }
+
+    String? nriContactVal;
+    if (json['nriContact'] is Map) {
+      nriContactVal = json['nriContact']['name'] as String? ?? '';
+    } else if (json['nriContact'] is String) {
+      nriContactVal = json['nriContact'] as String;
+    }
+
+    return Senior(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      age: json['age'] as int? ?? 0,
+      gender: json['gender'] as String? ?? '',
+      zone: zoneVal,
+      city: json['city'] as String? ?? '',
+      tier: json['tier'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      conditions: (json['conditions'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      mobility: json['mobility'] as String? ?? '',
+      careAide: careAideVal,
+      avatar: json['avatar'] as String? ?? '',
+      phone: json['phone'] as String? ?? '',
+      vitals: json['vitals'] as Map<String, dynamic>? ?? {},
+      lastCheckIn: json['lastCheckIn'] != null
+          ? DateTime.tryParse(json['lastCheckIn'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      nriContact: nriContactVal,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'age': age,
+      'gender': gender,
+      'zone': zone,
+      'city': city,
+      'tier': tier,
+      'status': status,
+      'conditions': conditions,
+      'mobility': mobility,
+      'careAide': careAide,
+      'avatar': avatar,
+      'phone': phone,
+      'vitals': vitals,
+      'lastCheckIn': lastCheckIn.toIso8601String(),
+      'nriContact': nriContact,
+    };
+  }
 }
 
 class CareLog {
@@ -80,12 +145,52 @@ class SubscriptionPlan {
   final String id, name, price, period;
   final List<String> features;
   final bool isCurrent, isPopular;
+  final int maxSeniors;
+  final bool active;
+  final String createdAt;
 
   SubscriptionPlan({
     required this.id, required this.name, required this.price,
     required this.period, required this.features,
     this.isCurrent = false, this.isPopular = false,
+    this.maxSeniors = 1,
+    this.active = true,
+    this.createdAt = '',
   });
+
+  factory SubscriptionPlan.fromJson(Map<String, dynamic> json) {
+    final priceInr = json['priceInr'] as int? ?? 0;
+    final apiPeriod = json['period'] as String? ?? 'monthly';
+    final displayPeriod = apiPeriod.toLowerCase() == 'monthly' ? ' /month' : ' /$apiPeriod';
+
+    return SubscriptionPlan(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      price: '₹$priceInr',
+      period: displayPeriod,
+      features: (json['features'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      isCurrent: false, // will be evaluated dynamically based on current user plan, or defaults to false
+      isPopular: json['isPopular'] as bool? ?? false,
+      maxSeniors: json['maxSeniors'] as int? ?? 1,
+      active: json['active'] as bool? ?? true,
+      createdAt: json['createdAt'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'price': price,
+      'period': period,
+      'features': features,
+      'isCurrent': isCurrent,
+      'isPopular': isPopular,
+      'maxSeniors': maxSeniors,
+      'active': active,
+      'createdAt': createdAt,
+    };
+  }
 }
 
 class EmergencyContact {

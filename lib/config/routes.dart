@@ -5,6 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../screens/splash_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/auth/register_screen.dart';
+
+// Admin
+import '../screens/admin/admin_home.dart';
 
 // Senior
 import '../screens/senior/senior_home.dart';
@@ -23,6 +27,7 @@ import '../screens/aide/visit_summary_screen.dart';
 // Settings
 import '../screens/settings/settings_screen.dart';
 import '../screens/settings/help_support_screen.dart';
+import '../screens/settings/razorpay_test_screen.dart';
 
 import '../models/mock_data.dart'; // import for Senior type
 
@@ -31,7 +36,7 @@ class AppRoutes {
     initialLocation: '/',
     debugLogDiagnostics: true,
     routes: [
-      // ─── Core / Splash ─────────────────────────
+      // Core / Splash
       GoRoute(
         path: '/',
         builder: (context, state) => const SplashScreen(),
@@ -44,8 +49,18 @@ class AppRoutes {
         path: '/login',
         builder: (context, state) => const LoginScreen(),
       ),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterScreen(),
+      ),
+      
+      // Admin Module
+      GoRoute(
+        path: '/admin',
+        builder: (context, state) => const AdminHome(),
+      ),
 
-      // ─── Senior Module ─────────────────────────
+      //Senior Module
       GoRoute(
         path: '/senior',
         builder: (context, state) => const SeniorHome(),
@@ -61,7 +76,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Family Module ─────────────────────────
+      //Family Module
       GoRoute(
         path: '/family',
         builder: (context, state) => const FamilyHome(),
@@ -76,7 +91,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Aide Module ───────────────────────────
+      //Aide Module
       GoRoute(
         path: '/aide',
         builder: (context, state) => const AideHome(),
@@ -92,7 +107,7 @@ class AppRoutes {
         ],
       ),
 
-      // ─── Settings Module ───────────────────────
+      //Settings Module
       GoRoute(
         path: '/settings',
         builder: (context, state) => const SettingsScreen(),
@@ -102,6 +117,12 @@ class AppRoutes {
             builder: (context, state) => const HelpSupportScreen(),
           ),
         ],
+      ),
+
+      //Razorpay Test Route
+      GoRoute(
+        path: '/razorpay-test',
+        builder: (context, state) => const RazorpayTestScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
